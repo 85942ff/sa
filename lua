@@ -158,7 +158,8 @@ local openfake, fakemoney = false, 0
 local AntiDoll, AntiAdmin = false, false
 local idleTeleportEnabled = true
 local busy = false
-local maskBuying = false  -- 改为一次性标志：成功购买后设为true，死亡重生时重置为false
+local maskBuying = false
+local maskBought = false
 
 -- 现金光环 & 物品光环
 local cashAuraEnabled = false
@@ -206,7 +207,8 @@ local function onCharacterAdded(character)
         if tpWalkEnabled then startTPWalk() end
         if flying then startFly() end
     end)
-    maskBuying = false  -- 重生后允许重新购买口罩
+    maskBuying = false
+    maskBought = false
 end
 if LocalPlayer.Character then
     onCharacterAdded(LocalPlayer.Character)
@@ -596,8 +598,8 @@ local function auraHeartbeat()
     if aurablade or isBlinkActive then
         local now = tick()
         local dist = (myRoot.Position - targetHead.Position).Magnitude
-        local attackInterval = 0  -- 每帧攻击
-        if now - lastAttack >= attackInterval and dist <= 50000 then  -- 距离上限50000
+        local attackInterval = 0
+        if now - lastAttack >= attackInterval and dist <= 50000 then
             if isBlinkActive then
                 if not originalPosition then
                     originalPosition = myRoot.Position
@@ -647,17 +649,18 @@ local function setupSilentAim()
 end
 setupSilentAim()
 
--- 自动口罩（仅执行一次，死亡重生后重新检查）【修复版】
+-- 自动口罩（一次性，死亡重置）
 local function tryBuyMaskOnce()
-    if maskBuying then return end  -- 已经买过就跳过
+    if maskBuying or maskBought then return end
+    maskBuying = true
     local char = LocalPlayer.Character
-    if not char then return end
+    if not char then maskBuying = false return end
     if char:FindFirstChild("Black Bandana") then
-        maskBuying = true  -- 已经有口罩了也标记成功
+        maskBought = true
+        maskBuying = false
         return
     end
 
-    maskBuying = true  -- 开始购买前设为true，防止重复触发
     local root = getRoot(char)
     if root then
         local offsetX = math.random(-8, 8)
@@ -675,14 +678,14 @@ local function tryBuyMaskOnce()
                 break
             end
         end
-        -- 等待口罩出现
         local startTime = tick()
         while not char:FindFirstChild("Black Bandana") and tick() - startTime < 2 do
             task.wait(0.1)
         end
         root.CFrame = idleLocation
     end
-    -- 无论成功与否，maskBuying 保持 true，直到死亡重生重置
+    maskBought = true
+    maskBuying = false
 end
 
 -- 自动ATM
@@ -848,7 +851,7 @@ local function runTreasurePhase()
     return found
 end
 
--- 自动寻找物品（改为0.0秒间隔）
+-- 自动寻找物品（每帧）
 local function runItemFindPhase()
     local did = false
     if autoblock then
@@ -899,10 +902,11 @@ local function runItemFindPhase()
     return did
 end
 
--- 自动打开保险（先买锁后开）
+-- 自动打开保险（先买锁，再平躺隐藏开保险，与ATM相同）
 local function runSafePhase()
     local lockGuid = getGuid("Lockpick")
     if not lockGuid then
+        -- 无锁，传送购买
         local root = getRoot(LocalPlayer.Character)
         if root then
             root.CFrame = lockpickBuyLocation
@@ -924,8 +928,28 @@ local function runSafePhase()
                     if prompt and prompt.Enabled then
                         local root = getRoot(LocalPlayer.Character)
                         if root then
-                            root.CFrame = chest.PrimaryPart.CFrame * CFrame.new(0,3,0)
+                            -- 传送到保险箱下方2米，平躺
+                            local lockCF = CFrame.new(chest.PrimaryPart.Position - Vector3.new(0,2,0)) * CFrame.Angles(math.rad(90), 0, 0)
+                            root.CFrame = lockCF
+
+                            -- 锁定位置
+                            local lockConn = RunService.Heartbeat:Connect(function()
+                                if root and root.Parent then
+                                    root.CFrame = lockCF
+                                    root.Velocity = Vector3.zero
+                                    root.RotVelocity = Vector3.zero
+                                end
+                            end)
+
+                            -- 触发开锁
                             fireproximityprompt(prompt)
+
+                            -- 等待一小段时间，确保开锁完成
+                            task.wait(1.0)
+
+                            if lockConn then lockConn:Disconnect() end
+                            -- 返回安全点
+                            root.CFrame = idleLocation
                             return true
                         end
                     end
@@ -1019,7 +1043,7 @@ local function updateIdleConnection()
     if idleConnection then idleConnection:Disconnect(); idleConnection = nil end
     if idleTeleportEnabled then
         idleConnection = RunService.Heartbeat:Connect(function()
-            if not busy and not maskBuying then
+            if not busy then
                 local root = getRoot(LocalPlayer.Character)
                 if root and root.Parent then
                     root.CFrame = idleLocation
@@ -1382,6 +1406,7 @@ local function combatTick()
         end
     end
 
+    -- 自动护甲（每帧检查，传送购买）
     if autovest and not busy then
         local armor = LocalPlayer:GetAttribute("armor")
         if not armor or armor <= 0 then
@@ -1406,6 +1431,7 @@ local function combatTick()
         end
     end
 
+    -- 自动回血（每帧检查，传送购买）
     if autohealth and not busy then
         local char = LocalPlayer.Character
         local humanoid = char and char:FindFirstChild("Humanoid")
@@ -1433,7 +1459,7 @@ local function combatTick()
 
     if autokz then
         local char = LocalPlayer.Character
-        if char and not maskBuying then
+        if char and not maskBought then
             task.spawn(tryBuyMaskOnce)
         end
     end
@@ -1491,7 +1517,7 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
--- 主任务循环：口罩 > ATM > 银行 > 珠宝店 > 藏宝图 > 寻找物品 > 自动保险
+-- 主任务循环：ATM > 银行 > 寻找物品 > 珠宝店 > 藏宝图 > 自动保险
 task.spawn(function()
     while true do
         if FromATM and not busy then
@@ -1506,6 +1532,13 @@ task.spawn(function()
             busy = false
         end
 
+        -- 寻找物品（宝石、印钞机等）
+        if (autoblock or automoss or autoxybs or autoxywp or autoptbs or automoney or card) and not busy then
+            busy = true
+            while runItemFindPhase() do task.wait() end
+            busy = false
+        end
+
         if autozbd and not busy then
             busy = true
             while autozbd and runJewelPhase() do task.wait(0.1) end
@@ -1515,12 +1548,6 @@ task.spawn(function()
         if autoTreasure and not busy then
             busy = true
             runTreasurePhase()
-            busy = false
-        end
-
-        if (autoblock or automoss or autoxybs or autoxywp or autoptbs or automoney or card) and not busy then
-            busy = true
-            while runItemFindPhase() do task.wait() end  -- 改为每帧执行
             busy = false
         end
 
