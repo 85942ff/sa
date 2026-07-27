@@ -902,11 +902,10 @@ local function runItemFindPhase()
     return did
 end
 
--- 自动打开保险（先买锁，再平躺隐藏开保险，与ATM相同）
+-- 自动打开保险（先买锁后开）
 local function runSafePhase()
     local lockGuid = getGuid("Lockpick")
     if not lockGuid then
-        -- 无锁，传送购买
         local root = getRoot(LocalPlayer.Character)
         if root then
             root.CFrame = lockpickBuyLocation
@@ -928,28 +927,8 @@ local function runSafePhase()
                     if prompt and prompt.Enabled then
                         local root = getRoot(LocalPlayer.Character)
                         if root then
-                            -- 传送到保险箱下方2米，平躺
-                            local lockCF = CFrame.new(chest.PrimaryPart.Position - Vector3.new(0,2,0)) * CFrame.Angles(math.rad(90), 0, 0)
-                            root.CFrame = lockCF
-
-                            -- 锁定位置
-                            local lockConn = RunService.Heartbeat:Connect(function()
-                                if root and root.Parent then
-                                    root.CFrame = lockCF
-                                    root.Velocity = Vector3.zero
-                                    root.RotVelocity = Vector3.zero
-                                end
-                            end)
-
-                            -- 触发开锁
+                            root.CFrame = chest.PrimaryPart.CFrame * CFrame.new(0,3,0)
                             fireproximityprompt(prompt)
-
-                            -- 等待一小段时间，确保开锁完成
-                            task.wait(1.0)
-
-                            if lockConn then lockConn:Disconnect() end
-                            -- 返回安全点
-                            root.CFrame = idleLocation
                             return true
                         end
                     end
@@ -1406,7 +1385,6 @@ local function combatTick()
         end
     end
 
-    -- 自动护甲（每帧检查，传送购买）
     if autovest and not busy then
         local armor = LocalPlayer:GetAttribute("armor")
         if not armor or armor <= 0 then
@@ -1431,7 +1409,6 @@ local function combatTick()
         end
     end
 
-    -- 自动回血（每帧检查，传送购买）
     if autohealth and not busy then
         local char = LocalPlayer.Character
         local humanoid = char and char:FindFirstChild("Humanoid")
@@ -1517,7 +1494,7 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
--- 主任务循环：ATM > 银行 > 寻找物品 > 珠宝店 > 藏宝图 > 自动保险
+-- 主任务循环：口罩（combatTick处理） > ATM > 银行 > 寻找物品 > 珠宝店 > 藏宝图 > 自动保险
 task.spawn(function()
     while true do
         if FromATM and not busy then
