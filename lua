@@ -1,4 +1,3 @@
--- 加载 Obsidian 库
 local repo = 'https://raw.githubusercontent.com/deividcomsono/Obsidian/main/'
 local Library = loadstring(game:HttpGet(repo .. 'Library.lua'))()
 local ThemeManager = loadstring(game:HttpGet(repo .. 'addons/ThemeManager.lua'))()
@@ -21,7 +20,6 @@ local Window = Library:CreateWindow({
     MenuFadeTime = 0
 })
 
--- 服务与玩家
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -33,7 +31,6 @@ local VirtualUser = game:GetService("VirtualUser")
 
 if not game:IsLoaded() then game.Loaded:Wait() end
 
--- 获取 devv 模块
 local devv = require(ReplicatedStorage:WaitForChild("devv"))
 local loadModule = devv.load
 local v3item = loadModule("v3item")
@@ -43,7 +40,6 @@ local InvokeServer = Signal.InvokeServer
 local Inventory = v3item.inventory
 local items = Inventory.items
 
--- 自定义 table.find 替代函数
 local function tableFind(tbl, value)
     for _, v in pairs(tbl) do
         if v == value then return true end
@@ -51,12 +47,10 @@ local function tableFind(tbl, value)
     return false
 end
 
--- GUID 生成函数
 local function GUID()
     return devv.load("GUID")()
 end
 
--- 位置常量
 local maskBaseLocation = CFrame.new(604.114014, 5.09485245, -1018.1275)
 local idleLocation = CFrame.new(1653.397216796875, -16.95315170288086, -530.3738403320312)
 local grenadeBuyLocation = CFrame.new(659.044739, 5.77163315, -706.697632, -1.1920929e-07, 0, -1.00000012, 0, 1, 0, 1.00000012, 0, -1.1920929e-07)
@@ -67,24 +61,20 @@ local lockpickBuyLocation = CFrame.new(659.280029, 5.50683689, -716.48999, -1.19
 local vestBuyLocation = CFrame.new(659.063477, 6.21583509, -684.365051, -1.1920929e-07, 0, -1.00000012, 0, 1, 0, 1.00000012, 0, -1.1920929e-07)
 local bandageBuyLocation = CFrame.new(1168.04468, 25.0443974, -972.782654, 0, 0, -1, 0, 1, 0, 1, 0, 0)
 
--- 特殊攻击武器购买位置
 local flamethrowerBuyLocation = CFrame.new(1658.28564, 24.541769, -499.186249, 0, 0, -1, 0, 1, 0, 1, 0, 0)
 
--- 投掷武器购买位置
 local throwBuyLocations = {
     ["Ninja Star"] = CFrame.new(337.521484, 25.4010315, -169.487122, 1, 0, 0, 0, 1, 0, 0, 0, 1),
     ["Tomahawk"] = CFrame.new(1027.82568, -48.4671783, -146.084671, 1, 0, 0, 0, 1, 0, 0, 0, 1),
     ["Banana Peel"] = CFrame.new(1568.33887, 3.93496037, -743.868835, 1, 0, 0, 0, 1, 0, 0, 0, 1),
 }
 
--- 枪械购买位置
 local gunBuyLocations = {
     ["Raygun"] = CFrame.new(147.022064, -98.0489502, -529.441406, 0, 0, 1, 0, 1, -0, -1, 0, 0),
     ["M4A1"] = CFrame.new(603.467651, 25.6628113, -922.04425, 1, 0, 0, 0, 1, 0, 0, 0, 1),
     ["AK47"] = CFrame.new(1628.71704, 6.15060806, -620.919617, 0.087131381, -0, -0.996196866, 0, 1, -0, 0.996196866, 0, 0.087131381),
 }
 
--- 通用函数
 local function getGuid(name)
     for _, v in pairs(items) do
         if v.name == name then
@@ -101,7 +91,6 @@ local function refreshItems()
     items = Inventory.items
 end
 
--- 物品缓存
 local itemPickupFolder = workspace.Game.Entities:FindFirstChild("ItemPickup")
 local itemMap = {}
 local function updateItemCache()
@@ -140,7 +129,6 @@ local function Autoitem(itemName)
     return false
 end
 
--- 状态变量
 local flySpeed = 50
 local currentSpeed = 10
 local tpWalkEnabled = false
@@ -150,14 +138,13 @@ local tpWalkConnection
 local antivoidConnection
 local silentaim = false
 
--- Ohio 功能变量
 local FromATM, FromBank, FromBalloon = false, false, false
 local Auarcuff, autovest, autohealth, autokz, callphone = false, false, false, false, false
 local autouse, remls, autobx, autozbd, autoTreasure = false, false, false, false, false
 local autoblock, automoss, autoxybs, autoxywp, autoptbs, automoney, card = false, false, false, false, false, false, false
 local aurablade, tpplayfb = false, false
 local fbx, fby, fbz = 0, 0, 5
-local targetPlayers = {}  -- 存储选中的目标玩家名称（单选）
+local targetPlayers = {}
 local selectedWeapon = "Ninja Star"
 local selectedGun = "Raygun"
 local bladeid
@@ -167,44 +154,35 @@ local idleTeleportEnabled = true
 local busy = false
 local maskBuying = false
 
--- 玩家模式选择
-local selectedMode = '单选'  -- 默认模式：ALL / 多选 / 单选
-
--- 特殊攻击变量（仅保留火焰/酸液）
 local flameAttackEnabled = false
 local flameAttackDistance = 10000
 local hitPart = "Head"
 
--- 开锁光环变量
 local autoUnlockEnabled = false
 local unlockAuraConnection = nil
 
--- 现金光环 & 物品光环
 local cashAuraEnabled = false
 local itemAuraEnabled = false
 local cashAuraConnection = nil
 local itemAuraConnection = nil
 
--- 自动售卖变量
 local autoSellEnabled = false
 local autoSellInterval = 1
 local lastBombardmentTime = 0
 local autoSellConnection
 
--- 独立弹药购买功能（间隔统一改为20秒）
 local autoBuyGunAmmo = false
 local autoBuyFlameAmmo = false
 local gunBuyTimer = 0
 local flameBuyTimer = 0
-local gunBuyInterval = 20   -- 改为20秒
-local flameBuyInterval = 20  -- 改为20秒
+local gunBuyInterval = 10
+local flameBuyInterval = 10
 local BUY_AMMO_COUNT = 10
 
 local lastAttack = 0
 local avoidPosition = Vector3.new(-23.943367, 53.9272232, -40.3150673)
 local avoidRadius = 100
 
--- 连接存储
 local flyJumpConnection
 local espLoopConnection
 local auraConnection
@@ -212,7 +190,6 @@ local fakeConnection
 local idleConnection
 local buyLoopConnection
 
--- 反坐
 local function antiSit(character)
     local hum = character:WaitForChild("Humanoid")
     hum:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
@@ -224,7 +201,6 @@ end
 if LocalPlayer.Character then antiSit(LocalPlayer.Character) end
 LocalPlayer.CharacterAdded:Connect(antiSit)
 
--- 角色变化处理（重生恢复）
 local function onCharacterAdded(character)
     local humanoid = character:WaitForChild("Humanoid")
     humanoid.Died:Connect(function()
@@ -248,14 +224,12 @@ if LocalPlayer.Character then
 end
 LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
 
--- 防AFK
 LocalPlayer.Idled:Connect(function()
     VirtualUser:Button2Down(Vector2.new(0, 0), Camera.CFrame)
     task.wait(1)
     VirtualUser:Button2Up(Vector2.new(0, 0), Camera.CFrame)
 end)
 
--- 飞行
 local function startFly()
     if flying or not LocalPlayer.Character then return end
     local char = LocalPlayer.Character
@@ -298,7 +272,6 @@ local function stopFly()
     end
 end
 
--- TPWalk
 local function startTPWalk()
     if tpWalkEnabled then return end
     tpWalkEnabled = true
@@ -318,7 +291,6 @@ local function stopTPWalk()
     if tpWalkConnection then tpWalkConnection:Disconnect(); tpWalkConnection = nil end
 end
 
--- 防虚空
 local function toggleAntiVoid(state)
     if state then
         if antivoidConnection then antivoidConnection:Disconnect() end
@@ -335,7 +307,6 @@ local function toggleAntiVoid(state)
     end
 end
 
--- 连跳
 local function toggleBunnyHop(state)
     if state then
         if flyJumpConnection then flyJumpConnection:Disconnect() end
@@ -349,7 +320,6 @@ local function toggleBunnyHop(state)
     end
 end
 
--- 穿墙
 local function toggleNoClip(state)
     local char = LocalPlayer.Character
     if char then
@@ -361,7 +331,6 @@ local function toggleNoClip(state)
     end
 end
 
--- 透明
 local transparentConnection
 local function toggleTransparent(state)
     if state then
@@ -398,7 +367,6 @@ local function toggleTransparent(state)
     end
 end
 
--- ESP
 local DrawingConfig = {
     Enabled = false,
     NameEnabled = true,
@@ -486,7 +454,6 @@ local function toggleESP(state)
     end
 end
 
--- 击杀/战斗功能管理
 local function findTarget()
     local closest, closestDist = nil, math.huge
     for _, player in ipairs(Players:GetPlayers()) do
@@ -528,7 +495,6 @@ local function createTrace(targetPos)
     game.Debris:AddItem(part, 1)
 end
 
--- ========== 准备武器函数 ==========
 local function prepareWeapon()
     if selectedWeapon == "Gun Kill" then
         local hasGun = false
@@ -593,19 +559,16 @@ local function prepareWeapon()
     end
 end
 
--- ========== 攻击目标函数（已移除原自动购买弹药逻辑）==========
 local function attackTarget(target)
     local targetPos = target.Position
     if selectedWeapon == "Gun Kill" then
         local item = v3item.inventory.getEquippedItem()
         if item and item.type == "Gun" then
-            -- 检查当前主弹药（弹匣弹药），如果为0则换弹并返回
             if item.ammoManager and item.ammoManager.ammo <= 0 then
                 FireServer("reload", item.guid)
                 return
             end
 
-            -- Raygun 特殊处理：只换弹，不购买弹药
             if selectedGun == "Raygun" then
                 local g = devv.load("GUID")()
                 createTrace(targetPos)
@@ -622,8 +585,6 @@ local function attackTarget(target)
                 return
             end
 
-            -- 非 Raygun 枪械：不再进行任何自动购买，完全依赖独立定时购买
-            -- 正常射击（消耗1发弹药）
             local g = devv.load("GUID")()
             createTrace(targetPos)
             FireServer("replicateProjectiles", item.guid, {{g, target.CFrame}}, item.firemode)
@@ -645,7 +606,6 @@ local function attackTarget(target)
     end
 end
 
--- ========== 核心循环（击杀 + TP 玩家）==========
 local function auraHeartbeat()
     local myChar = LocalPlayer.Character
     if not myChar or not getRoot(myChar) then return end
@@ -655,19 +615,11 @@ local function auraHeartbeat()
 
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
-            -- 目标检测逻辑（根据模式）
             local isTarget = false
-
-            if selectedMode == 'ALL' then
-                -- ALL模式：攻击所有非好友玩家
+            if #targetPlayers > 0 then
+                isTarget = tableFind(targetPlayers, player.Name)
+            else
                 isTarget = true
-            elseif selectedMode == '单选' or selectedMode == '多选' then
-                -- 单选/多选：只攻击 targetPlayers 列表中的玩家
-                if #targetPlayers == 0 then
-                    isTarget = false  -- 未选择任何目标时不攻击
-                else
-                    isTarget = tableFind(targetPlayers, player.Name)
-                end
             end
 
             if isTarget and not player.Character:FindFirstChildOfClass("ForceField") and not LocalPlayer:IsFriendsWith(player.UserId) then
@@ -707,7 +659,6 @@ local function updateAuraConnection()
     end
 end
 
--- 静默自瞄 hook
 local function setupSilentAim()
     if v3item and v3item.projectiles then
         local oldNewProjectile = v3item.projectiles.newProjectileOfType
@@ -724,7 +675,6 @@ local function setupSilentAim()
 end
 setupSilentAim()
 
--- 自动口罩
 local function buyMaskIfNeeded()
     if maskBuying then return end
     local char = LocalPlayer.Character
@@ -758,7 +708,6 @@ local function buyMaskIfNeeded()
     maskBuying = false
 end
 
--- 自动ATM
 local function runATMPhase()
     local atms = workspace:FindFirstChild("ATMs")
     if not atms then return end
@@ -799,7 +748,6 @@ local function runATMPhase()
     root.CFrame = idleLocation
 end
 
--- 自动银行
 local function ensureItem(itemName, buyLocation)
     for _, v in pairs(items) do
         if v.name == itemName then return v.guid end
@@ -878,7 +826,6 @@ local function tryBankHeist()
     return true
 end
 
--- 珠宝店
 local function runJewelPhase()
     local cases = workspace:FindFirstChild("GemRobbery"):FindFirstChild("JewelryCases")
     if not cases then return false end
@@ -896,7 +843,6 @@ local function runJewelPhase()
     return false
 end
 
--- 自动藏宝图
 local function runTreasurePhase()
     local treasureGuid = getGuid("Treasure Map")
     if not treasureGuid then return false end
@@ -941,7 +887,6 @@ local function runTreasurePhase()
     return true
 end
 
--- 自动寻找物品
 local function runItemFindPhase()
     local did = false
     if autoblock then
@@ -992,7 +937,6 @@ local function runItemFindPhase()
     return did
 end
 
--- 自动打开保险
 local function runSafePhase()
     local lockGuid = getGuid("Lockpick")
     if not lockGuid then
@@ -1007,7 +951,7 @@ local function runSafePhase()
         return false
     end
 
-    local chestTypes = {"SmallChest","SmallSafe","MediumSafe","LargeSafe","JewelSafe","GoldJewelSafe"}
+    local chestTypes = {"SmallSafe","MediumSafe","LargeSafe","JewelSafe","GoldJewelSafe"}
     for _, ct in pairs(chestTypes) do
         local folder = workspace.Game.Entities:FindFirstChild(ct)
         if folder then
@@ -1043,7 +987,6 @@ local function runSafePhase()
     return false
 end
 
--- 开锁光环
 local function startUnlockAura()
     if unlockAuraConnection then unlockAuraConnection:Disconnect() end
     unlockAuraConnection = RunService.Heartbeat:Connect(function()
@@ -1057,7 +1000,7 @@ local function startUnlockAura()
             InvokeServer("attemptPurchase", "Lockpick")
         end
 
-        local safeTypes = {"LargeSafe", "MediumSafe", "SmallSafe", "JewelSafe", "GoldJewelSafe", "LargeChest"}
+        local safeTypes = {"LargeSafe", "MediumSafe", "SmallSafe", "JewelSafe", "GoldJewelSafe"}
         for _, safeType in ipairs(safeTypes) do
             local folder = workspace.Game.Entities:FindFirstChild(safeType)
             if folder then
@@ -1083,7 +1026,6 @@ local function stopUnlockAura()
     end
 end
 
--- 现金光环
 local function startCashAura()
     cashAuraConnection = RunService.Heartbeat:Connect(function()
         if not cashAuraEnabled then return end
@@ -1110,7 +1052,6 @@ local function stopCashAura()
     end
 end
 
--- 物品光环
 local valuableItems = {
     "Dark Matter Gem", "Void Gem", "Diamond Ring", "Diamond", "Rollie",
     "Watch", "Glock 18", "AR-15", "Amethyst", "Topaz", "Emerald",
@@ -1161,7 +1102,6 @@ local function stopItemAura()
     end
 end
 
--- 空闲归位
 local function updateIdleConnection()
     if idleConnection then idleConnection:Disconnect(); idleConnection = nil end
     if idleTeleportEnabled then
@@ -1178,7 +1118,6 @@ local function updateIdleConnection()
     end
 end
 
--- ==================== 特殊攻击功能（火焰/酸液，含自动换弹） ====================
 local function ensureSpecialWeapon(weaponName, buyLocation)
     local guid = getGuid(weaponName)
     if not guid then
@@ -1215,12 +1154,10 @@ local function startFlameAttack()
                     local equippedName = equippedItem.name
                     local currentAmmo = equippedItem.ammoManager and equippedItem.ammoManager.ammo or 0
 
-                    -- 如果弹药为0，执行换弹并跳过本次攻击
                     if currentAmmo <= 0 then
                         FireServer("reload", equippedGUID)
                         task.wait(0.2)
                     else
-                        -- 弹药充足，执行攻击
                         local friendIDs = {}
                         for _, player in pairs(Players:GetPlayers()) do
                             if player ~= LocalPlayer then
@@ -1236,16 +1173,11 @@ local function startFlameAttack()
                             for _, player in pairs(Players:GetPlayers()) do
                                 if not flameAttackEnabled then break end
                                 if player ~= LocalPlayer and player.Character then
-                                    -- 目标检测逻辑（根据模式）
                                     local isTarget = false
-                                    if selectedMode == 'ALL' then
+                                    if #targetPlayers > 0 then
+                                        isTarget = tableFind(targetPlayers, player.Name)
+                                    else
                                         isTarget = true
-                                    elseif selectedMode == '单选' or selectedMode == '多选' then
-                                        if #targetPlayers == 0 then
-                                            isTarget = false
-                                        else
-                                            isTarget = tableFind(targetPlayers, player.Name)
-                                        end
                                     end
 
                                     if isTarget then
@@ -1296,12 +1228,10 @@ local function startFlameAttack()
     end)
 end
 
--- ==================== 独立弹药购买循环（间隔20秒） ====================
 task.spawn(function()
     while true do
         task.wait(1)
 
-        -- 击杀枪弹药购买（M4/AK，非 Raygun）
         if autoBuyGunAmmo and selectedWeapon == "Gun Kill" and selectedGun ~= "Raygun" then
             gunBuyTimer = gunBuyTimer + 1
             if gunBuyTimer >= gunBuyInterval then
@@ -1326,7 +1256,6 @@ task.spawn(function()
             gunBuyTimer = 0
         end
 
-        -- 火枪弹药购买（火焰/酸液）
         if autoBuyFlameAmmo and flameAttackEnabled then
             flameBuyTimer = flameBuyTimer + 1
             if flameBuyTimer >= flameBuyInterval then
@@ -1353,7 +1282,6 @@ task.spawn(function()
     end
 end)
 
--- ==================== UI 设置 ====================
 local Tabs = {
     Player = Window:AddTab('玩家', 'user'),
     Visual = Window:AddTab('视觉', 'eye'),
@@ -1362,7 +1290,6 @@ local Tabs = {
     ["UI Settings"] = Window:AddTab('UI 调试', 'settings')
 }
 
--- ==================== 获取玩家列表 ====================
 local function getPlayerListValues()
     local names = {}
     for _, player in ipairs(Players:GetPlayers()) do
@@ -1373,7 +1300,6 @@ local function getPlayerListValues()
     return names
 end
 
--- ==================== 特殊攻击 UI ====================
 local SpecialGroup1 = Tabs.SpecialAttack:AddLeftGroupbox('火焰/酸液攻击')
 SpecialGroup1:AddSlider('flameDistance', {
     Text = '攻击距离',
@@ -1393,7 +1319,6 @@ SpecialGroup1:AddToggle('flameAttack', {
     end
 })
 
--- ==================== 玩家 Tab ====================
 local PlayerGroup = Tabs.Player:AddLeftGroupbox('移动')
 PlayerGroup:AddSlider('flySpeed', { Text = '飞行速度', Min = 10, Max = 200, Default = 50, Callback = function(v) flySpeed = v end })
 PlayerGroup:AddToggle('flyToggle', { Text = '飞行模式（谨慎使用）', Default = false, Callback = function(s) if s then startFly() else stopFly() end end })
@@ -1406,68 +1331,46 @@ PlayerGroup2:AddToggle('bunnyHopToggle', { Text = '连跳', Default = false, Cal
 PlayerGroup2:AddToggle('noClipToggle', { Text = '穿墙', Default = false, Callback = toggleNoClip })
 PlayerGroup2:AddToggle('antiVoidToggle', { Text = '防虚空掉落', Default = false, Callback = toggleAntiVoid })
 
--- ==================== 视觉 Tab ====================
 local VisualGroup = Tabs.Visual:AddLeftGroupbox('ESP 设置')
 VisualGroup:AddToggle('espMaster', { Text = '开启 ESP', Default = false, Callback = toggleESP })
 VisualGroup:AddToggle('espName', { Text = '显示玩家名', Default = true, Callback = function(s) DrawingConfig.NameEnabled = s end })
 VisualGroup:AddToggle('espDist', { Text = '显示距离', Default = true, Callback = function(s) DrawingConfig.DistanceEnabled = s end })
 VisualGroup:AddToggle('espHP', { Text = '显示 HP', Default = true, Callback = function(s) DrawingConfig.HealthText = s end })
 
--- ==================== 击杀（主标签页） ====================
 local KillGroup = Tabs.Ohio:AddLeftGroupbox('击杀')
 
--- 玩家选择下拉菜单（多选默认，由模式控制逻辑）
 local playerDropdown = KillGroup:AddDropdown('targetPlayers', {
     Text = '选择目标玩家',
-    Desc = '根据模式选择目标（多选时按住Ctrl或Shift）',
+    Desc = '选择一个玩家作为攻击目标（再次点击已选中的可取消）',
     Values = getPlayerListValues(),
-    Default = {},
-    Multi = true,
-    Callback = function(values)
-        -- 如果当前模式为ALL，忽略任何选择
-        if selectedMode == 'ALL' then
-            targetPlayers = {}
-            return
-        end
-
-        -- 单选模式：只取第一个选中的玩家
-        if selectedMode == '单选' then
-            targetPlayers = {}
-            if values and #values > 0 then
-                local name = values[1]
-                if Players:FindFirstChild(name) then
-                    table.insert(targetPlayers, name)
-                end
-            end
-            return
-        end
-
-        -- 多选模式：取所有选中的玩家
-        if selectedMode == '多选' then
-            targetPlayers = {}
-            if values and #values > 0 then
-                for _, name in ipairs(values) do
-                    if Players:FindFirstChild(name) then
-                        table.insert(targetPlayers, name)
-                    end
-                end
-            end
-        end
-    end
-})
-
--- 玩家模式选择（放在目标玩家下面）
-local modeDropdown = KillGroup:AddDropdown('playerMode', {
-    Text = '选择玩家模式',
-    Desc = 'ALL：攻击所有非好友玩家 | 多选：自由选择多个玩家 | 单选：只攻击一个玩家',
-    Values = {'ALL', '多选', '单选'},
-    Default = '单选',
+    Default = '',
     Multi = false,
-    Callback = function(v)
-        selectedMode = (v[1] or v)
-        -- 切换到ALL时自动清空目标列表
-        if selectedMode == 'ALL' then
+    Callback = function(value)
+        if not value or value == '' then
             targetPlayers = {}
+            return
+        end
+        if #targetPlayers > 0 and targetPlayers[1] == value then
+            targetPlayers = {}
+            task.spawn(function()
+                if playerDropdown then
+                    pcall(function()
+                        if playerDropdown.SetValue then
+                            playerDropdown:SetValue('')
+                        elseif playerDropdown.Set then
+                            playerDropdown:Set('')
+                        elseif playerDropdown.Value ~= nil then
+                            playerDropdown.Value = ''
+                        end
+                    end)
+                end
+            end)
+            return
+        end
+        targetPlayers = {}
+        local player = Players:FindFirstChild(value)
+        if player then
+            table.insert(targetPlayers, value)
         end
     end
 })
@@ -1508,11 +1411,10 @@ KillGroup:AddSlider('fbx', { Text = 'X 偏移', Min = -20, Max = 20, Default = 0
 KillGroup:AddSlider('fby', { Text = 'Y 偏移', Min = -20, Max = 20, Default = 0, Callback = function(v) fby = v end })
 KillGroup:AddSlider('fbz', { Text = 'Z 偏移', Min = -20, Max = 20, Default = 5, Callback = function(v) fbz = v end })
 
--- 独立弹药购买开关（间隔20秒）
 local AmmoGroup = Tabs.Ohio:AddRightGroupbox('弹药自动购买')
 AmmoGroup:AddToggle('autoBuyGunAmmo', {
     Text = '击杀枪自动买弹药（M4/AK）',
-    Desc = '每20秒传送购买大量弹药',
+    Desc = '每10秒传送购买大量弹药',
     Default = false,
     Callback = function(s)
         autoBuyGunAmmo = s
@@ -1523,7 +1425,7 @@ AmmoGroup:AddToggle('autoBuyGunAmmo', {
 })
 AmmoGroup:AddToggle('autoBuyFlameAmmo', {
     Text = '火枪自动买弹药（火焰/酸液）',
-    Desc = '每20秒传送购买大量弹药',
+    Desc = '每10秒传送购买大量弹药',
     Default = false,
     Callback = function(s)
         autoBuyFlameAmmo = s
@@ -1533,18 +1435,24 @@ AmmoGroup:AddToggle('autoBuyFlameAmmo', {
     end
 })
 
--- 自动刷新玩家列表
 task.spawn(function()
     while true do
-        task.wait(3)
+        task.wait(0.5)
         local newList = getPlayerListValues()
-        if playerDropdown and playerDropdown.Refresh then
-            playerDropdown:Refresh(newList, true)
+        if playerDropdown then
+            pcall(function()
+                if playerDropdown.SetOptions then
+                    playerDropdown:SetOptions(newList)
+                elseif playerDropdown.Refresh then
+                    playerDropdown:Refresh(newList, true)
+                elseif playerDropdown.Set then
+                    playerDropdown:Set(newList)
+                end
+            end)
         end
     end
 end)
 
--- ==================== 战斗 ====================
 local CombatGroup = Tabs.Ohio:AddRightGroupbox('战斗')
 CombatGroup:AddToggle('autoVest', { Text = '自动护甲', Default = false, Callback = function(s) autovest = s end })
 CombatGroup:AddToggle('autoHeal', { Text = '自动回血', Default = false, Callback = function(s) autohealth = s end })
@@ -1552,7 +1460,6 @@ CombatGroup:AddToggle('autoMask', { Text = '自动口罩', Default = false, Call
 CombatGroup:AddToggle('phoneSpam', { Text = '电话骚扰', Default = false, Callback = function(s) callphone = s end })
 CombatGroup:AddToggle('arrestAura', { Text = '逮捕光环', Default = false, Callback = function(s) Auarcuff = s end })
 
--- ==================== 自动 ====================
 local AutoGroup = Tabs.Ohio:AddLeftGroupbox('自动')
 AutoGroup:AddToggle('autoATM', { Text = '自动摧毁ATM', Default = false, Callback = function(s) FromATM = s end })
 AutoGroup:AddToggle('autoBank', { Text = '自动偷盗银行', Default = false, Callback = function(s) FromBank = s end })
@@ -1581,7 +1488,6 @@ AutoGroup:AddToggle('itemAura', { Text = '物品光环', Default = false, Callba
     if s then startItemAura() else stopItemAura() end
 end })
 
--- ==================== 自动售卖 ====================
 local function autoSellItems()
     for _, v in pairs(items) do
         if (v.type == "Holdable" and v.subtype == "gem" and v.sellPrice < 5000) or
@@ -1613,7 +1519,6 @@ AutoGroup:AddToggle('idleTeleport', { Text = 'AFK位置', Default = true, Callba
     updateIdleConnection()
 end })
 
--- ==================== 寻找物品 ====================
 local FindGroup = Tabs.Ohio:AddRightGroupbox('寻找物品')
 FindGroup:AddToggle('findRare', { Text = '自动寻找稀有物品', Default = false, Callback = function(s) autoxywp = s end })
 FindGroup:AddToggle('findBalloon', { Text = '自动寻找气球', Default = false, Callback = function(s) FromBalloon = s end })
@@ -1624,7 +1529,6 @@ FindGroup:AddToggle('findPresents', { Text = '自动寻找礼物', Default = fal
 FindGroup:AddToggle('findBlocks', { Text = '自动寻找幸运方块', Default = false, Callback = function(s) autoblock = s end })
 FindGroup:AddToggle('findCard', { Text = '自动寻找红卡', Default = false, Callback = function(s) card = s end })
 
--- ==================== 反制 ====================
 local CounterGroup = Tabs.Ohio:AddLeftGroupbox('反制')
 CounterGroup:AddButton('重新进入服务器', function() game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer) end)
 local toastMsg, toastTime = "", 5
@@ -1660,7 +1564,6 @@ end)
 CounterGroup:AddToggle('antiDoll', { Text = '反布娃娃', Default = false, Callback = function(s) AntiDoll = s end })
 CounterGroup:AddToggle('antiAdmin', { Text = '反管理', Default = false, Callback = function(s) AntiAdmin = s end })
 
--- ==================== 绕过 ====================
 local BypassGroup = Tabs.Ohio:AddRightGroupbox('绕过')
 BypassGroup:AddInput('fakeMoney', { Text = '伪装金钱数量', Default = '', Callback = function(v) fakemoney = tonumber(v) or 0 end })
 BypassGroup:AddToggle('fakeMoneyToggle', { Text = '开启伪装', Default = false, Callback = function(s)
@@ -1729,7 +1632,6 @@ BypassGroup:AddButton('绕过火&酸伤害', function()
     if acid then acid:Destroy() end
 end)
 
--- ==================== 武器 ====================
 local WeaponGroup = Tabs.Ohio:AddLeftGroupbox('武器')
 WeaponGroup:AddToggle('silentAim', { Text = '静默自瞄', Default = false, Callback = function(s) silentaim = s end })
 WeaponGroup:AddButton('全枪无后座', function()
@@ -1767,7 +1669,6 @@ WeaponGroup:AddButton('快速换弹', function()
     end
 end)
 
--- ==================== UI 调试 ====================
 local MenuGroup = Tabs["UI Settings"]:AddLeftGroupbox("Debug")
 MenuGroup:AddToggle("KeybindMenuOpen", {
     Default = Library.KeybindFrame.Visible,
@@ -1812,7 +1713,6 @@ SaveManager:LoadAutoloadConfig()
 
 updateIdleConnection()
 
--- ==================== 核心逻辑 ====================
 local function combatTick()
     if autouse then
         for _, v in pairs(items) do
@@ -1920,7 +1820,6 @@ end
 
 RunService.Heartbeat:Connect(combatTick)
 
--- ==================== 反布娃娃/反管理 ====================
 RunService.Heartbeat:Connect(function()
     if AntiDoll then
         local ragdolled = LocalPlayer:GetAttribute("isRagdoll")
@@ -1939,7 +1838,6 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
--- ==================== 主任务循环 ====================
 task.spawn(function()
     while true do
         if FromATM and not busy then
