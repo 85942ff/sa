@@ -51,6 +51,11 @@ local function tableFind(tbl, value)
     return false
 end
 
+-- GUID 生成函数
+local function GUID()
+    return devv.load("GUID")()
+end
+
 -- 位置常量
 local maskBaseLocation = CFrame.new(604.114014, 5.09485245, -1018.1275)
 local idleLocation = CFrame.new(1653.397216796875, -16.95315170288086, -530.3738403320312)
@@ -62,6 +67,9 @@ local lockpickBuyLocation = CFrame.new(659.280029, 5.50683689, -716.48999, -1.19
 local vestBuyLocation = CFrame.new(659.063477, 6.21583509, -684.365051, -1.1920929e-07, 0, -1.00000012, 0, 1, 0, 1.00000012, 0, -1.1920929e-07)
 local bandageBuyLocation = CFrame.new(1168.04468, 25.0443974, -972.782654, 0, 0, -1, 0, 1, 0, 1, 0, 0)
 
+-- 特殊攻击武器购买位置
+local flamethrowerBuyLocation = CFrame.new(1658.28564, 24.541769, -499.186249, 0, 0, -1, 0, 1, 0, 1, 0, 0)
+
 -- 投掷武器购买位置
 local throwBuyLocations = {
     ["Ninja Star"] = CFrame.new(337.521484, 25.4010315, -169.487122, 1, 0, 0, 0, 1, 0, 0, 0, 1),
@@ -69,7 +77,7 @@ local throwBuyLocations = {
     ["Banana Peel"] = CFrame.new(1568.33887, 3.93496037, -743.868835, 1, 0, 0, 0, 1, 0, 0, 0, 1),
 }
 
--- 枪械购买位置（购买后自动返回AFK位置）
+-- 枪械购买位置
 local gunBuyLocations = {
     ["Raygun"] = CFrame.new(147.022064, -98.0489502, -529.441406, 0, 0, 1, 0, 1, -0, -1, 0, 0),
     ["M4A1"] = CFrame.new(603.467651, 25.6628113, -922.04425, 1, 0, 0, 0, 1, 0, 0, 0, 1),
@@ -140,7 +148,6 @@ local flying = false
 local flyBV, flyBG, flyConnection
 local tpWalkConnection
 local antivoidConnection
-local fk3rd = false
 local silentaim = false
 
 -- Ohio 功能变量
@@ -148,9 +155,9 @@ local FromATM, FromBank, FromBalloon = false, false, false
 local Auarcuff, autovest, autohealth, autokz, callphone = false, false, false, false, false
 local autouse, remls, autobx, autozbd, autoTreasure = false, false, false, false, false
 local autoblock, automoss, autoxybs, autoxywp, autoptbs, automoney, card = false, false, false, false, false, false, false
-local aurablade, tpplayfb, isBlinkActive = false, false, false
+local aurablade, tpplayfb = false, false
 local fbx, fby, fbz = 0, 0, 5
-local targetPlayers = {}
+local targetPlayers = {}  -- 存储选中的目标玩家名称（单选）
 local selectedWeapon = "Ninja Star"
 local selectedGun = "Raygun"
 local bladeid
@@ -158,8 +165,19 @@ local openfake, fakemoney = false, 0
 local AntiDoll, AntiAdmin = false, false
 local idleTeleportEnabled = true
 local busy = false
-local maskBuying = false   -- 临时标志，购买期间为true
-local maskBought = false   -- 永久标志，成功购买后设为true，死亡重生重置
+local maskBuying = false
+
+-- 玩家模式选择
+local selectedMode = '单选'  -- 默认模式：ALL / 多选 / 单选
+
+-- 特殊攻击变量（仅保留火焰/酸液）
+local flameAttackEnabled = false
+local flameAttackDistance = 10000
+local hitPart = "Head"
+
+-- 开锁光环变量
+local autoUnlockEnabled = false
+local unlockAuraConnection = nil
 
 -- 现金光环 & 物品光环
 local cashAuraEnabled = false
@@ -173,9 +191,16 @@ local autoSellInterval = 1
 local lastBombardmentTime = 0
 local autoSellConnection
 
-local lastPhoneTick = 0
+-- 独立弹药购买功能（间隔统一改为20秒）
+local autoBuyGunAmmo = false
+local autoBuyFlameAmmo = false
+local gunBuyTimer = 0
+local flameBuyTimer = 0
+local gunBuyInterval = 20   -- 改为20秒
+local flameBuyInterval = 20  -- 改为20秒
+local BUY_AMMO_COUNT = 10
+
 local lastAttack = 0
-local originalPosition, blinkStartTime = nil, 0
 local avoidPosition = Vector3.new(-23.943367, 53.9272232, -40.3150673)
 local avoidRadius = 100
 
@@ -185,6 +210,7 @@ local espLoopConnection
 local auraConnection
 local fakeConnection
 local idleConnection
+local buyLoopConnection
 
 -- 反坐
 local function antiSit(character)
@@ -198,7 +224,7 @@ end
 if LocalPlayer.Character then antiSit(LocalPlayer.Character) end
 LocalPlayer.CharacterAdded:Connect(antiSit)
 
--- 角色变化处理（重生时重置口罩标志）
+-- 角色变化处理（重生恢复）
 local function onCharacterAdded(character)
     local humanoid = character:WaitForChild("Humanoid")
     humanoid.Died:Connect(function()
@@ -208,7 +234,14 @@ local function onCharacterAdded(character)
         if flying then startFly() end
     end)
     maskBuying = false
-    maskBought = false  -- 重生后允许重新购买口罩
+
+    task.wait(0.5)
+    if aurablade then
+        prepareWeapon()
+    end
+    if flameAttackEnabled then
+        startFlameAttack()
+    end
 end
 if LocalPlayer.Character then
     onCharacterAdded(LocalPlayer.Character)
@@ -495,60 +528,85 @@ local function createTrace(targetPos)
     game.Debris:AddItem(part, 1)
 end
 
--- 根据选择的武器准备武器（购买后自动返回原地）
+-- ========== 准备武器函数 ==========
 local function prepareWeapon()
     if selectedWeapon == "Gun Kill" then
-        local buyLoc = gunBuyLocations[selectedGun]
-        if buyLoc then
-            local root = getRoot(LocalPlayer.Character)
-            if root then
-                root.CFrame = buyLoc
-                task.wait(0.5)
-            end
-        end
-        InvokeServer("attemptPurchase", selectedGun)
-        task.wait(0.3)
+        local hasGun = false
         for _, v in pairs(items) do
             if v.name == selectedGun then
+                hasGun = true
                 FireServer("equip", v.guid)
                 break
             end
         end
-        local root = getRoot(LocalPlayer.Character)
-        if root then root.CFrame = idleLocation end
-    else
-        local buyLoc = throwBuyLocations[selectedWeapon]
-        if buyLoc then
+        if not hasGun then
+            local buyLoc = gunBuyLocations[selectedGun]
             local root = getRoot(LocalPlayer.Character)
-            if root then
+            if root and buyLoc then
+                local originalCF = root.CFrame
                 root.CFrame = buyLoc
                 task.wait(0.5)
+                InvokeServer("attemptPurchase", selectedGun)
+                task.wait(0.3)
+                for _, v in pairs(items) do
+                    if v.name == selectedGun then
+                        FireServer("equip", v.guid)
+                        break
+                    end
+                end
+                root.CFrame = originalCF
             end
         end
-        InvokeServer("attemptPurchase", selectedWeapon)
+    else
+        local hasWeapon = false
         for _, v in pairs(items) do
             if v.name == selectedWeapon then
+                hasWeapon = true
                 bladeid = v.guid
+                FireServer("equip", bladeid)
                 break
             end
         end
-        if bladeid then
-            FireServer("equip", bladeid)
-            task.wait(0.1)
-            local _, id = InvokeServer("throwSticky", devv.load("GUID")(), selectedWeapon, bladeid, Vector3.zero, Vector3.zero)
-            bladeid = id
+        if not hasWeapon then
+            local buyLoc = throwBuyLocations[selectedWeapon]
+            local root = getRoot(LocalPlayer.Character)
+            if root and buyLoc then
+                local originalCF = root.CFrame
+                root.CFrame = buyLoc
+                task.wait(0.5)
+                InvokeServer("attemptPurchase", selectedWeapon)
+                for _, v in pairs(items) do
+                    if v.name == selectedWeapon then
+                        bladeid = v.guid
+                        break
+                    end
+                end
+                if bladeid then
+                    FireServer("equip", bladeid)
+                    task.wait(0.1)
+                    local _, id = InvokeServer("throwSticky", devv.load("GUID")(), selectedWeapon, bladeid, Vector3.zero, Vector3.zero)
+                    bladeid = id
+                end
+                root.CFrame = originalCF
+            end
         end
-        local root = getRoot(LocalPlayer.Character)
-        if root then root.CFrame = idleLocation end
     end
 end
 
+-- ========== 攻击目标函数（已移除原自动购买弹药逻辑）==========
 local function attackTarget(target)
     local targetPos = target.Position
     if selectedWeapon == "Gun Kill" then
-        local item = v3item.GetEquipped(LocalPlayer)
+        local item = v3item.inventory.getEquippedItem()
         if item and item.type == "Gun" then
-            if item.ammoManager and item.ammoManager.ammo > 0 then
+            -- 检查当前主弹药（弹匣弹药），如果为0则换弹并返回
+            if item.ammoManager and item.ammoManager.ammo <= 0 then
+                FireServer("reload", item.guid)
+                return
+            end
+
+            -- Raygun 特殊处理：只换弹，不购买弹药
+            if selectedGun == "Raygun" then
                 local g = devv.load("GUID")()
                 createTrace(targetPos)
                 FireServer("replicateProjectiles", item.guid, {{g, target.CFrame}}, item.firemode)
@@ -558,10 +616,25 @@ local function attackTarget(target)
                     pos = targetPos,
                     hitPlayerId = Players:GetPlayerFromCharacter(target.Parent).UserId
                 })
+                if item.ammoManager then
+                    item.ammoManager.ammo = item.ammoManager.ammo - 1
+                end
+                return
+            end
+
+            -- 非 Raygun 枪械：不再进行任何自动购买，完全依赖独立定时购买
+            -- 正常射击（消耗1发弹药）
+            local g = devv.load("GUID")()
+            createTrace(targetPos)
+            FireServer("replicateProjectiles", item.guid, {{g, target.CFrame}}, item.firemode)
+            FireServer("projectileHit", g, "player", {
+                hitSize = target.Size,
+                hitPart = target,
+                pos = targetPos,
+                hitPlayerId = Players:GetPlayerFromCharacter(target.Parent).UserId
+            })
+            if item.ammoManager then
                 item.ammoManager.ammo = item.ammoManager.ammo - 1
-            else
-                InvokeServer("attemptPurchaseAmmo", item.name)
-                FireServer("reload", item.guid)
             end
         end
     else
@@ -572,15 +645,31 @@ local function attackTarget(target)
     end
 end
 
+-- ========== 核心循环（击杀 + TP 玩家）==========
 local function auraHeartbeat()
     local myChar = LocalPlayer.Character
     if not myChar or not getRoot(myChar) then return end
     local myRoot = getRoot(myChar)
     local targetHead = nil
     local minDist = math.huge
+
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
-            local isTarget = (#targetPlayers == 0) or tableFind(targetPlayers, player.Name)
+            -- 目标检测逻辑（根据模式）
+            local isTarget = false
+
+            if selectedMode == 'ALL' then
+                -- ALL模式：攻击所有非好友玩家
+                isTarget = true
+            elseif selectedMode == '单选' or selectedMode == '多选' then
+                -- 单选/多选：只攻击 targetPlayers 列表中的玩家
+                if #targetPlayers == 0 then
+                    isTarget = false  -- 未选择任何目标时不攻击
+                else
+                    isTarget = tableFind(targetPlayers, player.Name)
+                end
+            end
+
             if isTarget and not player.Character:FindFirstChildOfClass("ForceField") and not LocalPlayer:IsFriendsWith(player.UserId) then
                 local head = player.Character.Head
                 local dist = (myRoot.Position - head.Position).Magnitude
@@ -591,39 +680,25 @@ local function auraHeartbeat()
             end
         end
     end
+
     if not targetHead then return end
+
     if tpplayfb then
         myRoot.CFrame = targetHead.CFrame * CFrame.new(fbx, fby, fbz)
     end
-    if aurablade or isBlinkActive then
+
+    if aurablade then
         local now = tick()
         local dist = (myRoot.Position - targetHead.Position).Magnitude
-        local attackInterval = 0  -- 每帧攻击
-        if now - lastAttack >= attackInterval and dist <= 200000 then  -- 距离上限200000
-            if isBlinkActive then
-                if not originalPosition then
-                    originalPosition = myRoot.Position
-                    myRoot.CFrame = CFrame.new(1000,1000,1000)
-                    blinkStartTime = now
-                    return
-                elseif now - blinkStartTime >= math.random(1,3) then
-                    myRoot.CFrame = targetHead.CFrame * CFrame.new(fbx, fby, fbz)
-                    attackTarget(targetHead)
-                    task.wait(0.05)
-                    myRoot.CFrame = CFrame.new(originalPosition)
-                    originalPosition = nil
-                    isBlinkActive = false
-                end
-            else
-                attackTarget(targetHead)
-                lastAttack = now
-            end
+        if now - lastAttack >= 0 and dist <= 200000 then
+            attackTarget(targetHead)
+            lastAttack = now
         end
     end
 end
 
 local function updateAuraConnection()
-    if aurablade or tpplayfb or isBlinkActive then
+    if aurablade or tpplayfb then
         if not auraConnection then
             auraConnection = RunService.Heartbeat:Connect(auraHeartbeat)
         end
@@ -649,18 +724,14 @@ local function setupSilentAim()
 end
 setupSilentAim()
 
--- 自动口罩（改进版：购买成功后立即返回AFK位置，并设置 maskBought 为 true，不再阻止归位）
-local function tryBuyMaskOnce()
-    if maskBuying or maskBought then return end
-    maskBuying = true
+-- 自动口罩
+local function buyMaskIfNeeded()
+    if maskBuying then return end
     local char = LocalPlayer.Character
-    if not char then maskBuying = false return end
-    if char:FindFirstChild("Black Bandana") then
-        maskBought = true
-        maskBuying = false
-        return
-    end
+    if not char then return end
+    if char:FindFirstChild("Black Bandana") then return end
 
+    maskBuying = true
     local root = getRoot(char)
     if root then
         local offsetX = math.random(-8, 8)
@@ -678,14 +749,12 @@ local function tryBuyMaskOnce()
                 break
             end
         end
-        -- 等待口罩出现
         local startTime = tick()
         while not char:FindFirstChild("Black Bandana") and tick() - startTime < 2 do
             task.wait(0.1)
         end
-        root.CFrame = idleLocation  -- 购买完毕立刻回到AFK位置
+        root.CFrame = idleLocation
     end
-    maskBought = true
     maskBuying = false
 end
 
@@ -829,30 +898,50 @@ end
 
 -- 自动藏宝图
 local function runTreasurePhase()
+    local treasureGuid = getGuid("Treasure Map")
+    if not treasureGuid then return false end
+
     local equipped = v3item.inventory.getEquippedItem()
-    if not equipped or equipped.name ~= "Treasure Map" then return false end
+    if not equipped or equipped.name ~= "Treasure Map" then
+        FireServer("equip", treasureGuid)
+        task.wait(0.3)
+    end
+
     local root = getRoot(LocalPlayer.Character)
     if not root then return false end
+
     local debris = workspace.Game.Local.Debris
-    local found = false
+    local marker = nil
     for _, treasure in pairs(debris:GetChildren()) do
         if treasure.Name == "TreasureMarker" then
-            root.CFrame = treasure.CFrame
-            local prompt = treasure:FindFirstChild("ProximityPrompt", true)
-            if prompt then
-                fireproximityprompt(prompt)
-            end
-            task.wait(0.5)
-            found = true
+            marker = treasure
+            break
         end
     end
-    if not found then
+    if not marker then return false end
+
+    root.CFrame = marker.CFrame
+    local prompt = marker:FindFirstChild("ProximityPrompt", true)
+    if prompt then
+        fireproximityprompt(prompt)
+    end
+
+    local startTime = tick()
+    while autoTreasure and tick() - startTime < 10 do
+        task.wait(0.2)
+        equipped = v3item.inventory.getEquippedItem()
+        if not equipped or equipped.name ~= "Treasure Map" then
+            break
+        end
+    end
+
+    if root and root.Parent then
         root.CFrame = idleLocation
     end
-    return found
+    return true
 end
 
--- 自动寻找物品（每帧）
+-- 自动寻找物品
 local function runItemFindPhase()
     local did = false
     if autoblock then
@@ -903,7 +992,7 @@ local function runItemFindPhase()
     return did
 end
 
--- 自动打开保险（先买锁后开）
+-- 自动打开保险
 local function runSafePhase()
     local lockGuid = getGuid("Lockpick")
     if not lockGuid then
@@ -918,7 +1007,7 @@ local function runSafePhase()
         return false
     end
 
-    local chestTypes = {"SmallChest","LargeChest","SmallSafe","MediumSafe","LargeSafe","JewelSafe","GoldJewelSafe"}
+    local chestTypes = {"SmallChest","SmallSafe","MediumSafe","LargeSafe","JewelSafe","GoldJewelSafe"}
     for _, ct in pairs(chestTypes) do
         local folder = workspace.Game.Entities:FindFirstChild(ct)
         if folder then
@@ -928,8 +1017,22 @@ local function runSafePhase()
                     if prompt and prompt.Enabled then
                         local root = getRoot(LocalPlayer.Character)
                         if root then
-                            root.CFrame = chest.PrimaryPart.CFrame * CFrame.new(0,3,0)
+                            local lockCF = CFrame.new(chest.PrimaryPart.Position - Vector3.new(0,2,0)) * CFrame.Angles(math.rad(90), 0, 0)
+                            root.CFrame = lockCF
+
+                            local lockConn = RunService.Heartbeat:Connect(function()
+                                if root and root.Parent then
+                                    root.CFrame = lockCF
+                                    root.Velocity = Vector3.zero
+                                    root.RotVelocity = Vector3.zero
+                                end
+                            end)
+
                             fireproximityprompt(prompt)
+                            task.wait(3.0)
+
+                            if lockConn then lockConn:Disconnect() end
+                            root.CFrame = idleLocation
                             return true
                         end
                     end
@@ -938,6 +1041,46 @@ local function runSafePhase()
         end
     end
     return false
+end
+
+-- 开锁光环
+local function startUnlockAura()
+    if unlockAuraConnection then unlockAuraConnection:Disconnect() end
+    unlockAuraConnection = RunService.Heartbeat:Connect(function()
+        if not autoUnlockEnabled then return end
+        local char = LocalPlayer.Character
+        local root = getRoot(char)
+        if not root then return end
+
+        local lockGuid = getGuid("Lockpick")
+        if not lockGuid then
+            InvokeServer("attemptPurchase", "Lockpick")
+        end
+
+        local safeTypes = {"LargeSafe", "MediumSafe", "SmallSafe", "JewelSafe", "GoldJewelSafe", "LargeChest"}
+        for _, safeType in ipairs(safeTypes) do
+            local folder = workspace.Game.Entities:FindFirstChild(safeType)
+            if folder then
+                for _, safe in ipairs(folder:GetChildren()) do
+                    if safe:FindFirstChild("ProximityPrompt", true) then
+                        local distance = (root.Position - safe:GetPivot().Position).Magnitude
+                        if distance <= 45 then
+                            pcall(function()
+                                fireproximityprompt(safe:FindFirstChild("ProximityPrompt", true))
+                            end)
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
+local function stopUnlockAura()
+    if unlockAuraConnection then
+        unlockAuraConnection:Disconnect()
+        unlockAuraConnection = nil
+    end
 end
 
 -- 现金光环
@@ -1018,12 +1161,12 @@ local function stopItemAura()
     end
 end
 
--- 空闲归位（移除 maskBuying 限制）
+-- 空闲归位
 local function updateIdleConnection()
     if idleConnection then idleConnection:Disconnect(); idleConnection = nil end
     if idleTeleportEnabled then
         idleConnection = RunService.Heartbeat:Connect(function()
-            if not busy then
+            if not busy and not maskBuying then
                 local root = getRoot(LocalPlayer.Character)
                 if root and root.Parent then
                     root.CFrame = idleLocation
@@ -1035,19 +1178,226 @@ local function updateIdleConnection()
     end
 end
 
--- UI
+-- ==================== 特殊攻击功能（火焰/酸液，含自动换弹） ====================
+local function ensureSpecialWeapon(weaponName, buyLocation)
+    local guid = getGuid(weaponName)
+    if not guid then
+        local root = getRoot(LocalPlayer.Character)
+        if root then
+            local originalCF = root.CFrame
+            root.CFrame = buyLocation
+            task.wait(0.5)
+            InvokeServer("attemptPurchase", weaponName)
+            task.wait(0.5)
+            refreshItems()
+            root.CFrame = originalCF
+        end
+    else
+        FireServer("equip", guid)
+    end
+end
+
+local function startFlameAttack()
+    task.spawn(function()
+        local same = {GUID()}
+        while flameAttackEnabled do
+            if not LocalPlayer.Character or not getRoot(LocalPlayer.Character) then
+                task.wait(0.5)
+            else
+                local equippedItem = v3item.inventory.getEquippedItem()
+                if not equippedItem or (equippedItem.name ~= "Flamethrower" and equippedItem.name ~= "Acid Gun") then
+                    if not getGuid("Flamethrower") and not getGuid("Acid Gun") then
+                        ensureSpecialWeapon("Flamethrower", flamethrowerBuyLocation)
+                    end
+                    task.wait(0.5)
+                else
+                    local equippedGUID = equippedItem.guid
+                    local equippedName = equippedItem.name
+                    local currentAmmo = equippedItem.ammoManager and equippedItem.ammoManager.ammo or 0
+
+                    -- 如果弹药为0，执行换弹并跳过本次攻击
+                    if currentAmmo <= 0 then
+                        FireServer("reload", equippedGUID)
+                        task.wait(0.2)
+                    else
+                        -- 弹药充足，执行攻击
+                        local friendIDs = {}
+                        for _, player in pairs(Players:GetPlayers()) do
+                            if player ~= LocalPlayer then
+                                local success, isFriend = pcall(function() return LocalPlayer:IsFriendsWith(player.UserId) end)
+                                if success and isFriend then
+                                    table.insert(friendIDs, player.UserId)
+                                end
+                            end
+                        end
+
+                        local myRoot = getRoot(LocalPlayer.Character)
+                        if myRoot then
+                            for _, player in pairs(Players:GetPlayers()) do
+                                if not flameAttackEnabled then break end
+                                if player ~= LocalPlayer and player.Character then
+                                    -- 目标检测逻辑（根据模式）
+                                    local isTarget = false
+                                    if selectedMode == 'ALL' then
+                                        isTarget = true
+                                    elseif selectedMode == '单选' or selectedMode == '多选' then
+                                        if #targetPlayers == 0 then
+                                            isTarget = false
+                                        else
+                                            isTarget = tableFind(targetPlayers, player.Name)
+                                        end
+                                    end
+
+                                    if isTarget then
+                                        local isFriend = false
+                                        for _, friendID in pairs(friendIDs) do
+                                            if player.UserId == friendID then
+                                                isFriend = true
+                                                break
+                                            end
+                                        end
+                                        if not isFriend then
+                                            local character = player.Character
+                                            local humanoid = character:FindFirstChild("Humanoid")
+                                            local targetPart = character:FindFirstChild(hitPart)
+                                            if humanoid and targetPart and humanoid.Health > 0 then
+                                                local targetRoot = character:FindFirstChild("HumanoidRootPart")
+                                                if targetRoot then
+                                                    local distance = (myRoot.Position - targetRoot.Position).magnitude
+                                                    if distance <= flameAttackDistance then
+                                                        FireServer("replicateProjectiles", equippedGUID, { { same[1], targetPart.CFrame } }, "auto")
+                                                        if equippedName == "Flamethrower" then
+                                                            FireServer("flameHit", same[1], GUID(), targetPart.Position)
+                                                        elseif equippedName == "Acid Gun" then
+                                                            FireServer("acidHit", same[1], GUID(), targetPart.Position)
+                                                        end
+                                                        FireServer("projectileHit", same[1], "player", {
+                                                            hitPart = targetPart,
+                                                            hitPlayerId = player.UserId,
+                                                            hitSize = targetPart.Size,
+                                                            pos = targetPart.Position
+                                                        })
+                                                        if equippedItem.ammoManager then
+                                                            equippedItem.ammoManager.ammo = equippedItem.ammoManager.ammo - 1
+                                                        end
+                                                    end
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            task.wait(0.1)
+        end
+    end)
+end
+
+-- ==================== 独立弹药购买循环（间隔20秒） ====================
+task.spawn(function()
+    while true do
+        task.wait(1)
+
+        -- 击杀枪弹药购买（M4/AK，非 Raygun）
+        if autoBuyGunAmmo and selectedWeapon == "Gun Kill" and selectedGun ~= "Raygun" then
+            gunBuyTimer = gunBuyTimer + 1
+            if gunBuyTimer >= gunBuyInterval then
+                gunBuyTimer = 0
+                local item = v3item.inventory.getEquippedItem()
+                if item and item.type == "Gun" and item.name == selectedGun then
+                    local buyLoc = gunBuyLocations[selectedGun]
+                    local root = getRoot(LocalPlayer.Character)
+                    if root and buyLoc then
+                        local originalCF = root.CFrame
+                        root.CFrame = buyLoc
+                        task.wait(0.5)
+                        for i = 1, BUY_AMMO_COUNT do
+                            InvokeServer("attemptPurchaseAmmo", item.name)
+                            task.wait(0.1)
+                        end
+                        root.CFrame = originalCF
+                    end
+                end
+            end
+        else
+            gunBuyTimer = 0
+        end
+
+        -- 火枪弹药购买（火焰/酸液）
+        if autoBuyFlameAmmo and flameAttackEnabled then
+            flameBuyTimer = flameBuyTimer + 1
+            if flameBuyTimer >= flameBuyInterval then
+                flameBuyTimer = 0
+                local equippedItem = v3item.inventory.getEquippedItem()
+                if equippedItem and (equippedItem.name == "Flamethrower" or equippedItem.name == "Acid Gun") then
+                    local buyLoc = flamethrowerBuyLocation
+                    local root = getRoot(LocalPlayer.Character)
+                    if root and buyLoc then
+                        local originalCF = root.CFrame
+                        root.CFrame = buyLoc
+                        task.wait(0.5)
+                        for i = 1, BUY_AMMO_COUNT do
+                            InvokeServer("attemptPurchaseAmmo", equippedItem.name)
+                            task.wait(0.1)
+                        end
+                        root.CFrame = originalCF
+                    end
+                end
+            end
+        else
+            flameBuyTimer = 0
+        end
+    end
+end)
+
+-- ==================== UI 设置 ====================
 local Tabs = {
     Player = Window:AddTab('玩家', 'user'),
     Visual = Window:AddTab('视觉', 'eye'),
     Ohio = Window:AddTab('主要', 'crosshair'),
+    SpecialAttack = Window:AddTab('特殊攻击', 'zap'),
     ["UI Settings"] = Window:AddTab('UI 调试', 'settings')
 }
 
--- 玩家 Tab
+-- ==================== 获取玩家列表 ====================
+local function getPlayerListValues()
+    local names = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            table.insert(names, player.Name)
+        end
+    end
+    return names
+end
+
+-- ==================== 特殊攻击 UI ====================
+local SpecialGroup1 = Tabs.SpecialAttack:AddLeftGroupbox('火焰/酸液攻击')
+SpecialGroup1:AddSlider('flameDistance', {
+    Text = '攻击距离',
+    Min = 1,
+    Max = 10000,
+    Default = 10000,
+    Callback = function(v) flameAttackDistance = v end
+})
+SpecialGroup1:AddToggle('flameAttack', {
+    Text = '火焰/酸液攻击',
+    Default = false,
+    Callback = function(s)
+        flameAttackEnabled = s
+        if s then
+            startFlameAttack()
+        end
+    end
+})
+
+-- ==================== 玩家 Tab ====================
 local PlayerGroup = Tabs.Player:AddLeftGroupbox('移动')
 PlayerGroup:AddSlider('flySpeed', { Text = '飞行速度', Min = 10, Max = 200, Default = 50, Callback = function(v) flySpeed = v end })
 PlayerGroup:AddToggle('flyToggle', { Text = '飞行模式（谨慎使用）', Default = false, Callback = function(s) if s then startFly() else stopFly() end end })
-PlayerGroup:AddSlider('moveSpeed', { Text = '移动速度', Min = 1, Max = 1000, Default = 10, Callback = function(v) currentSpeed = v end })  -- 移速上限1000
+PlayerGroup:AddSlider('moveSpeed', { Text = '移动速度', Min = 1, Max = 1000, Default = 10, Callback = function(v) currentSpeed = v end })
 PlayerGroup:AddToggle('speedToggle', { Text = '加速', Default = false, Callback = function(s) if s then startTPWalk() else stopTPWalk() end end })
 
 local PlayerGroup2 = Tabs.Player:AddRightGroupbox('角色')
@@ -1056,65 +1406,145 @@ PlayerGroup2:AddToggle('bunnyHopToggle', { Text = '连跳', Default = false, Cal
 PlayerGroup2:AddToggle('noClipToggle', { Text = '穿墙', Default = false, Callback = toggleNoClip })
 PlayerGroup2:AddToggle('antiVoidToggle', { Text = '防虚空掉落', Default = false, Callback = toggleAntiVoid })
 
--- 视觉 Tab
+-- ==================== 视觉 Tab ====================
 local VisualGroup = Tabs.Visual:AddLeftGroupbox('ESP 设置')
 VisualGroup:AddToggle('espMaster', { Text = '开启 ESP', Default = false, Callback = toggleESP })
 VisualGroup:AddToggle('espName', { Text = '显示玩家名', Default = true, Callback = function(s) DrawingConfig.NameEnabled = s end })
 VisualGroup:AddToggle('espDist', { Text = '显示距离', Default = true, Callback = function(s) DrawingConfig.DistanceEnabled = s end })
 VisualGroup:AddToggle('espHP', { Text = '显示 HP', Default = true, Callback = function(s) DrawingConfig.HealthText = s end })
 
--- 击杀
-local function updatePlayerDropdown(dropdown)
-    if not dropdown then return end
-    local names = {}
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            table.insert(names, player.Name)
+-- ==================== 击杀（主标签页） ====================
+local KillGroup = Tabs.Ohio:AddLeftGroupbox('击杀')
+
+-- 玩家选择下拉菜单（多选默认，由模式控制逻辑）
+local playerDropdown = KillGroup:AddDropdown('targetPlayers', {
+    Text = '选择目标玩家',
+    Desc = '根据模式选择目标（多选时按住Ctrl或Shift）',
+    Values = getPlayerListValues(),
+    Default = {},
+    Multi = true,
+    Callback = function(values)
+        -- 如果当前模式为ALL，忽略任何选择
+        if selectedMode == 'ALL' then
+            targetPlayers = {}
+            return
+        end
+
+        -- 单选模式：只取第一个选中的玩家
+        if selectedMode == '单选' then
+            targetPlayers = {}
+            if values and #values > 0 then
+                local name = values[1]
+                if Players:FindFirstChild(name) then
+                    table.insert(targetPlayers, name)
+                end
+            end
+            return
+        end
+
+        -- 多选模式：取所有选中的玩家
+        if selectedMode == '多选' then
+            targetPlayers = {}
+            if values and #values > 0 then
+                for _, name in ipairs(values) do
+                    if Players:FindFirstChild(name) then
+                        table.insert(targetPlayers, name)
+                    end
+                end
+            end
         end
     end
-    dropdown:Refresh(names, true)
-end
-
-local initialPlayerList = {}
-for _, player in ipairs(Players:GetPlayers()) do
-    if player ~= LocalPlayer then
-        table.insert(initialPlayerList, player.Name)
-    end
-end
-
-local KillGroup = Tabs.Ohio:AddLeftGroupbox('击杀')
-local playerDropdown = KillGroup:AddDropdown('targetPlayers', {
-    Text = '目标玩家',
-    Values = initialPlayerList,
-    Default = initialPlayerList,
-    Multi = true,
-    Callback = function(v) targetPlayers = v end
 })
-KillGroup:AddDropdown('killMethod', { Text = '击杀方式', Values = {'Ninja Star', 'Tomahawk', 'Banana Peel', 'Gun Kill'}, Default = 'Ninja Star', Multi = false, Callback = function(v)
-    selectedWeapon = (v[1] or v)
-end })
-KillGroup:AddDropdown('gunSelect', { Text = '选择枪械', Values = {'Raygun', 'M4A1', 'AK47'}, Default = 'Raygun', Multi = false, Callback = function(v)
-    selectedGun = (v[1] or v)
-end })
-KillGroup:AddToggle('autoKill', { Text = '自动击杀', Default = false, Callback = function(s)
-    aurablade = s
-    if s then prepareWeapon() end
-    updateAuraConnection()
-end })
-KillGroup:AddToggle('blinkToggle', { Text = '闪现', Default = false, Callback = function(s) isBlinkActive = s; if not s then originalPosition = nil end; updateAuraConnection() end })
-KillGroup:AddToggle('tpPlayer', { Text = 'TP玩家', Default = false, Callback = function(s) tpplayfb = s; updateAuraConnection() end })
+
+-- 玩家模式选择（放在目标玩家下面）
+local modeDropdown = KillGroup:AddDropdown('playerMode', {
+    Text = '选择玩家模式',
+    Desc = 'ALL：攻击所有非好友玩家 | 多选：自由选择多个玩家 | 单选：只攻击一个玩家',
+    Values = {'ALL', '多选', '单选'},
+    Default = '单选',
+    Multi = false,
+    Callback = function(v)
+        selectedMode = (v[1] or v)
+        -- 切换到ALL时自动清空目标列表
+        if selectedMode == 'ALL' then
+            targetPlayers = {}
+        end
+    end
+})
+
+KillGroup:AddDropdown('killMethod', {
+    Text = '击杀方式',
+    Values = {'Ninja Star', 'Tomahawk', 'Banana Peel', 'Gun Kill'},
+    Default = 'Ninja Star',
+    Multi = false,
+    Callback = function(v)
+        selectedWeapon = (v[1] or v)
+    end
+})
+KillGroup:AddDropdown('gunSelect', {
+    Text = '选择枪械',
+    Values = {'Raygun', 'M4A1', 'AK47'},
+    Default = 'Raygun',
+    Multi = false,
+    Callback = function(v)
+        selectedGun = (v[1] or v)
+    end
+})
+KillGroup:AddToggle('autoKill', {
+    Text = '自动击杀',
+    Default = false,
+    Callback = function(s)
+        aurablade = s
+        if s then prepareWeapon() end
+        updateAuraConnection()
+    end
+})
+KillGroup:AddToggle('tpPlayer', {
+    Text = 'TP玩家',
+    Default = false,
+    Callback = function(s) tpplayfb = s; updateAuraConnection() end
+})
 KillGroup:AddSlider('fbx', { Text = 'X 偏移', Min = -20, Max = 20, Default = 0, Callback = function(v) fbx = v end })
 KillGroup:AddSlider('fby', { Text = 'Y 偏移', Min = -20, Max = 20, Default = 0, Callback = function(v) fby = v end })
 KillGroup:AddSlider('fbz', { Text = 'Z 偏移', Min = -20, Max = 20, Default = 5, Callback = function(v) fbz = v end })
 
+-- 独立弹药购买开关（间隔20秒）
+local AmmoGroup = Tabs.Ohio:AddRightGroupbox('弹药自动购买')
+AmmoGroup:AddToggle('autoBuyGunAmmo', {
+    Text = '击杀枪自动买弹药（M4/AK）',
+    Desc = '每20秒传送购买大量弹药',
+    Default = false,
+    Callback = function(s)
+        autoBuyGunAmmo = s
+        if s then
+            gunBuyTimer = 0
+        end
+    end
+})
+AmmoGroup:AddToggle('autoBuyFlameAmmo', {
+    Text = '火枪自动买弹药（火焰/酸液）',
+    Desc = '每20秒传送购买大量弹药',
+    Default = false,
+    Callback = function(s)
+        autoBuyFlameAmmo = s
+        if s then
+            flameBuyTimer = 0
+        end
+    end
+})
+
+-- 自动刷新玩家列表
 task.spawn(function()
     while true do
-        updatePlayerDropdown(playerDropdown)
-        task.wait(0.5)
+        task.wait(3)
+        local newList = getPlayerListValues()
+        if playerDropdown and playerDropdown.Refresh then
+            playerDropdown:Refresh(newList, true)
+        end
     end
 end)
 
--- 战斗
+-- ==================== 战斗 ====================
 local CombatGroup = Tabs.Ohio:AddRightGroupbox('战斗')
 CombatGroup:AddToggle('autoVest', { Text = '自动护甲', Default = false, Callback = function(s) autovest = s end })
 CombatGroup:AddToggle('autoHeal', { Text = '自动回血', Default = false, Callback = function(s) autohealth = s end })
@@ -1122,27 +1552,36 @@ CombatGroup:AddToggle('autoMask', { Text = '自动口罩', Default = false, Call
 CombatGroup:AddToggle('phoneSpam', { Text = '电话骚扰', Default = false, Callback = function(s) callphone = s end })
 CombatGroup:AddToggle('arrestAura', { Text = '逮捕光环', Default = false, Callback = function(s) Auarcuff = s end })
 
--- 自动
+-- ==================== 自动 ====================
 local AutoGroup = Tabs.Ohio:AddLeftGroupbox('自动')
 AutoGroup:AddToggle('autoATM', { Text = '自动摧毁ATM', Default = false, Callback = function(s) FromATM = s end })
 AutoGroup:AddToggle('autoBank', { Text = '自动偷盗银行', Default = false, Callback = function(s) FromBank = s end })
 AutoGroup:AddToggle('autoJewel', { Text = '自动珠宝店', Default = false, Callback = function(s) autozbd = s end })
 AutoGroup:AddToggle('autoTreasure', { Text = '自动藏宝图', Default = false, Callback = function(s) autoTreasure = s end })
 AutoGroup:AddToggle('autoSafe', { Text = '自动打开保险', Default = false, Callback = function(s) autobx = s end })
+AutoGroup:AddToggle('unlockAura', {
+    Text = '开锁光环',
+    Default = false,
+    Callback = function(s)
+        autoUnlockEnabled = s
+        if s then
+            startUnlockAura()
+        else
+            stopUnlockAura()
+        end
+    end
+})
 
--- 现金光环
 AutoGroup:AddToggle('cashAura', { Text = '现金光环', Default = false, Callback = function(s)
     cashAuraEnabled = s
     if s then startCashAura() else stopCashAura() end
 end })
-
--- 物品光环
 AutoGroup:AddToggle('itemAura', { Text = '物品光环', Default = false, Callback = function(s)
     itemAuraEnabled = s
     if s then startItemAura() else stopItemAura() end
 end })
 
--- 自动售卖
+-- ==================== 自动售卖 ====================
 local function autoSellItems()
     for _, v in pairs(items) do
         if (v.type == "Holdable" and v.subtype == "gem" and v.sellPrice < 5000) or
@@ -1167,7 +1606,6 @@ AutoGroup:AddToggle('autoSell', { Text = '自动售卖全部物品', Default = f
         pcall(autoSellItems)
     end
 end })
-
 AutoGroup:AddToggle('autoRemove', { Text = '自动移除垃圾', Default = false, Callback = function(s) remls = s end })
 AutoGroup:AddToggle('autoConsume', { Text = '自动使用消耗品', Default = false, Callback = function(s) autouse = s end })
 AutoGroup:AddToggle('idleTeleport', { Text = 'AFK位置', Default = true, Callback = function(s)
@@ -1175,7 +1613,7 @@ AutoGroup:AddToggle('idleTeleport', { Text = 'AFK位置', Default = true, Callba
     updateIdleConnection()
 end })
 
--- 寻找物品
+-- ==================== 寻找物品 ====================
 local FindGroup = Tabs.Ohio:AddRightGroupbox('寻找物品')
 FindGroup:AddToggle('findRare', { Text = '自动寻找稀有物品', Default = false, Callback = function(s) autoxywp = s end })
 FindGroup:AddToggle('findBalloon', { Text = '自动寻找气球', Default = false, Callback = function(s) FromBalloon = s end })
@@ -1186,7 +1624,7 @@ FindGroup:AddToggle('findPresents', { Text = '自动寻找礼物', Default = fal
 FindGroup:AddToggle('findBlocks', { Text = '自动寻找幸运方块', Default = false, Callback = function(s) autoblock = s end })
 FindGroup:AddToggle('findCard', { Text = '自动寻找红卡', Default = false, Callback = function(s) card = s end })
 
--- 反制
+-- ==================== 反制 ====================
 local CounterGroup = Tabs.Ohio:AddLeftGroupbox('反制')
 CounterGroup:AddButton('重新进入服务器', function() game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer) end)
 local toastMsg, toastTime = "", 5
@@ -1222,7 +1660,7 @@ end)
 CounterGroup:AddToggle('antiDoll', { Text = '反布娃娃', Default = false, Callback = function(s) AntiDoll = s end })
 CounterGroup:AddToggle('antiAdmin', { Text = '反管理', Default = false, Callback = function(s) AntiAdmin = s end })
 
--- 绕过
+-- ==================== 绕过 ====================
 local BypassGroup = Tabs.Ohio:AddRightGroupbox('绕过')
 BypassGroup:AddInput('fakeMoney', { Text = '伪装金钱数量', Default = '', Callback = function(v) fakemoney = tonumber(v) or 0 end })
 BypassGroup:AddToggle('fakeMoneyToggle', { Text = '开启伪装', Default = false, Callback = function(s)
@@ -1291,7 +1729,7 @@ BypassGroup:AddButton('绕过火&酸伤害', function()
     if acid then acid:Destroy() end
 end)
 
--- 武器
+-- ==================== 武器 ====================
 local WeaponGroup = Tabs.Ohio:AddLeftGroupbox('武器')
 WeaponGroup:AddToggle('silentAim', { Text = '静默自瞄', Default = false, Callback = function(s) silentaim = s end })
 WeaponGroup:AddButton('全枪无后座', function()
@@ -1329,7 +1767,7 @@ WeaponGroup:AddButton('快速换弹', function()
     end
 end)
 
--- UI 设置
+-- ==================== UI 调试 ====================
 local MenuGroup = Tabs["UI Settings"]:AddLeftGroupbox("Debug")
 MenuGroup:AddToggle("KeybindMenuOpen", {
     Default = Library.KeybindFrame.Visible,
@@ -1374,7 +1812,7 @@ SaveManager:LoadAutoloadConfig()
 
 updateIdleConnection()
 
--- ========== 核心逻辑 ==========
+-- ==================== 核心逻辑 ====================
 local function combatTick()
     if autouse then
         for _, v in pairs(items) do
@@ -1391,17 +1829,18 @@ local function combatTick()
         if not armor or armor <= 0 then
             local lightGuid = getGuid("Light Vest")
             if not lightGuid then
-                busy = true
                 local root = getRoot(LocalPlayer.Character)
                 if root then
+                    busy = true
+                    local originalCF = root.CFrame
                     root.CFrame = vestBuyLocation
                     task.wait(0.5)
                     InvokeServer("attemptPurchase", "Light Vest")
                     task.wait(0.5)
                     refreshItems()
-                    root.CFrame = idleLocation
+                    root.CFrame = originalCF
+                    busy = false
                 end
-                busy = false
             else
                 FireServer("equip", lightGuid)
                 FireServer("useConsumable", lightGuid)
@@ -1412,33 +1851,36 @@ local function combatTick()
 
     if autohealth and not busy then
         local char = LocalPlayer.Character
-        local humanoid = char and char:FindFirstChild("Humanoid")
-        if humanoid and humanoid.Health > 0 and humanoid.Health < humanoid.MaxHealth then
-            local bandage = getGuid("Bandage")
-            if not bandage then
-                busy = true
-                local root = getRoot(LocalPlayer.Character)
-                if root then
-                    root.CFrame = bandageBuyLocation
-                    task.wait(0.5)
-                    InvokeServer("attemptPurchase", "Bandage")
-                    task.wait(0.5)
-                    refreshItems()
-                    root.CFrame = idleLocation
+        if char then
+            local humanoid = char:FindFirstChild("Humanoid")
+            if humanoid and humanoid.Health > 0 and humanoid.Health < humanoid.MaxHealth then
+                local bandage = getGuid("Bandage")
+                if not bandage then
+                    local root = getRoot(char)
+                    if root then
+                        busy = true
+                        local originalCF = root.CFrame
+                        root.CFrame = bandageBuyLocation
+                        task.wait(0.5)
+                        InvokeServer("attemptPurchase", "Bandage")
+                        task.wait(0.5)
+                        refreshItems()
+                        root.CFrame = originalCF
+                        busy = false
+                    end
+                else
+                    FireServer("equip", bandage)
+                    FireServer("useConsumable", bandage)
+                    FireServer("removeItem", bandage)
                 end
-                busy = false
-            else
-                FireServer("equip", bandage)
-                FireServer("useConsumable", bandage)
-                FireServer("removeItem", bandage)
             end
         end
     end
 
     if autokz then
         local char = LocalPlayer.Character
-        if char and not maskBought then
-            task.spawn(tryBuyMaskOnce)
+        if char and not char:FindFirstChild("Black Bandana") and not maskBuying then
+            task.spawn(buyMaskIfNeeded)
         end
     end
 
@@ -1463,7 +1905,9 @@ local function combatTick()
                     if not loadModule("ClientReplicator").Get(player, "cuffed") then
                         local cuffGuid
                         for _, v in pairs(items) do if v.name == "Handcuffs" then cuffGuid = v.guid break end end
-                        if not cuffGuid then InvokeServer("attemptPurchase","Handcuffs") else
+                        if not cuffGuid then
+                            InvokeServer("attemptPurchase","Handcuffs")
+                        else
                             FireServer("equip", cuffGuid)
                             FireServer("cuffPlayer", player)
                         end
@@ -1476,7 +1920,7 @@ end
 
 RunService.Heartbeat:Connect(combatTick)
 
--- 反布娃娃/反管理
+-- ==================== 反布娃娃/反管理 ====================
 RunService.Heartbeat:Connect(function()
     if AntiDoll then
         local ragdolled = LocalPlayer:GetAttribute("isRagdoll")
@@ -1495,7 +1939,7 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
--- 主任务循环：口罩 > ATM > 银行 > 珠宝店 > 藏宝图 > 寻找物品 > 自动保险
+-- ==================== 主任务循环 ====================
 task.spawn(function()
     while true do
         if FromATM and not busy then
@@ -1510,6 +1954,12 @@ task.spawn(function()
             busy = false
         end
 
+        if (autoblock or automoss or autoxybs or autoxywp or autoptbs or automoney or card) and not busy then
+            busy = true
+            while runItemFindPhase() do task.wait() end
+            busy = false
+        end
+
         if autozbd and not busy then
             busy = true
             while autozbd and runJewelPhase() do task.wait(0.1) end
@@ -1518,13 +1968,12 @@ task.spawn(function()
 
         if autoTreasure and not busy then
             busy = true
-            runTreasurePhase()
-            busy = false
-        end
-
-        if (autoblock or automoss or autoxybs or autoxywp or autoptbs or automoney or card) and not busy then
-            busy = true
-            while runItemFindPhase() do task.wait() end  -- 每帧
+            while autoTreasure do
+                if not runTreasurePhase() then
+                    break
+                end
+                task.wait(0.1)
+            end
             busy = false
         end
 
