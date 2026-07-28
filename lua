@@ -841,6 +841,8 @@ local function runATMPhase()
     local root = getRoot(LocalPlayer.Character)
     if not root then return end
 
+    local originalCF = root.CFrame  -- 记录原始位置
+
     local nearestATM, nearestDist = nil, math.huge
     for _, atm in ipairs(atms:GetChildren()) do
         if atm:IsA("Model") and (atm:GetAttribute("health") or 0) ~= 0 then
@@ -872,8 +874,11 @@ local function runATMPhase()
     task.wait(1.4)
 
     if lockConn then lockConn:Disconnect() end
+
     if currentMode == "AFK" then
         root.CFrame = getCurrentIdleCF()
+    else
+        root.CFrame = originalCF  -- Normal 模式返回原位置
     end
 end
 
@@ -905,6 +910,8 @@ local function tryBankHeist()
 
     local root = getRoot(LocalPlayer.Character)
     if not root then return false end
+
+    local originalCF = root.CFrame  -- 记录原始位置
 
     root.CFrame = bombThrowLocation
     task.wait(0.3)
@@ -951,8 +958,12 @@ local function tryBankHeist()
     if cashConnection then cashConnection:Disconnect() end
 
     root = getRoot(LocalPlayer.Character)
-    if root and currentMode == "AFK" then
-        root.CFrame = getCurrentIdleCF()
+    if root then
+        if currentMode == "AFK" then
+            root.CFrame = getCurrentIdleCF()
+        else
+            root.CFrame = originalCF  -- Normal 模式返回原位置
+        end
     end
     return true
 end
@@ -960,15 +971,24 @@ end
 local function runJewelPhase()
     local cases = workspace:FindFirstChild("GemRobbery"):FindFirstChild("JewelryCases")
     if not cases then return false end
+
+    local root = getRoot(LocalPlayer.Character)
+    if not root then return false end
+    local originalCF = root.CFrame
+
     for _, descendant in pairs(cases:GetDescendants()) do
         if descendant:IsA("ProximityPrompt") and descendant.ActionText == "Steal" and descendant.Enabled then
             descendant.HoldDuration = 0
-            local root = getRoot(LocalPlayer.Character)
-            if root then
-                root.CFrame = CFrame.new(descendant.Parent.Position)
-                fireproximityprompt(descendant)
-                return true
+            root.CFrame = CFrame.new(descendant.Parent.Position)
+            fireproximityprompt(descendant)
+
+            -- 任务结束后返回原位置或挂机点
+            if currentMode == "AFK" then
+                root.CFrame = getCurrentIdleCF()
+            else
+                root.CFrame = originalCF
             end
+            return true
         end
     end
     return false
@@ -986,6 +1006,7 @@ local function runTreasurePhase()
 
     local root = getRoot(LocalPlayer.Character)
     if not root then return false end
+    local originalCF = root.CFrame
 
     local debris = workspace.Game.Local.Debris
     local marker = nil
@@ -1012,8 +1033,12 @@ local function runTreasurePhase()
         end
     end
 
-    if root and root.Parent and currentMode == "AFK" then
-        root.CFrame = getCurrentIdleCF()
+    if root and root.Parent then
+        if currentMode == "AFK" then
+            root.CFrame = getCurrentIdleCF()
+        else
+            root.CFrame = originalCF
+        end
     end
     return true
 end
@@ -1065,6 +1090,8 @@ local function runItemFindPhase()
             if Autoitem("Military Armory Keycard") then did = true end
         end
     end
+
+    -- 每个物品拾取后，Normal 模式下返回原位（由 Autoitem 内部恢复）
     return did
 end
 
@@ -1092,6 +1119,7 @@ local function runSafePhase()
                     if prompt and prompt.Enabled then
                         local root = getRoot(LocalPlayer.Character)
                         if root then
+                            local originalCF = root.CFrame
                             local lockCF = CFrame.new(chest.PrimaryPart.Position - Vector3.new(0,3,0)) * CFrame.Angles(math.rad(90), 0, 0)
                             root.CFrame = lockCF
 
@@ -1109,6 +1137,8 @@ local function runSafePhase()
                             if lockConn then lockConn:Disconnect() end
                             if currentMode == "AFK" then
                                 root.CFrame = getCurrentIdleCF()
+                            else
+                                root.CFrame = originalCF
                             end
                             return true
                         end
@@ -1709,7 +1739,7 @@ local function setupUI()
     do
         local AutoGroup = Tabs.Ohio:AddLeftGroupbox('自动')
 
-        -- 农场模式选择（原挂机模式选择，已改名）
+        -- 农场模式选择
         AutoGroup:AddDropdown('modeSelect', {
             Text = '农场模式',
             Values = {'AFK', 'Normal'},
