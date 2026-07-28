@@ -190,6 +190,46 @@ local fakeConnection
 local idleConnection
 local buyLoopConnection
 
+local autoCraftEnabled = false
+local autoClaimEnabled = false
+local craftConnection
+local autoStoreGems = false
+local storeConnection
+
+local autoRewardEnabled = false
+local autoRewardConnection = nil
+
+local function autoClaimRewards()
+    for day = 1, 12 do
+        Signal.InvokeServer("claimDailyReward", day)
+        task.wait(0.1)
+    end
+    for tier = 1, 3 do
+        for level = 1, 6 do
+            Signal.InvokeServer("claimPlaytimeReward", tier, level)
+            task.wait(0.1)
+        end
+    end
+end
+
+local function startAutoRewardLoop()
+    autoRewardEnabled = true
+    autoRewardConnection = task.spawn(function()
+        while autoRewardEnabled do
+            autoClaimRewards()
+            task.wait(5)
+        end
+    end)
+end
+
+local function stopAutoRewardLoop()
+    autoRewardEnabled = false
+    if autoRewardConnection then
+        task.cancel(autoRewardConnection)
+        autoRewardConnection = nil
+    end
+end
+
 local function antiSit(character)
     local hum = character:WaitForChild("Humanoid")
     hum:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
@@ -1054,9 +1094,8 @@ end
 
 local valuableItems = {
     "Dark Matter Gem", "Void Gem", "Diamond Ring", "Diamond", "Rollie",
-    "Watch", "Glock 18", "AR-15", "Amethyst", "Topaz", "Emerald",
-    "Gold Bar", "Sapphire", "Ruby", "Emerald Ring", "Topaz Ring",
-    "Amethyst Ring", "Sapphire Ring", "Ruby Ring", "AK-47", "Glock",
+    "Watch", "Glock 18", "AR-15", "Amethyst", "Sapphire",
+    "Ruby", "AK-47", "Glock",
     "Raygun", "Gold AK-47", "Gold Deagle", "AS Val", "AUG", "Acid Gun",
     "P90", "RPK", "Sawn Off", "Scar L", "Saiga 12", "Tommy Gun",
     "Double Barrel", "Deagle", "Dragunov", "Flamethrower", "M249 SAW",
@@ -1228,6 +1267,37 @@ local function startFlameAttack()
     end)
 end
 
+local function performCrafting()
+    if autoCraftEnabled then
+        Signal.InvokeServer("beginCraft", 'RollieCraft')
+    end
+    if autoClaimEnabled then
+        Signal.InvokeServer("claimCraft", 'RollieCraft')
+    end
+end
+
+local function storeGems()
+    local housingPlots = workspace:FindFirstChild("HousingPlots")
+    if not housingPlots then return end
+    local items = v3item.inventory.items
+    for _, v in pairs(housingPlots:GetDescendants()) do
+        if v:IsA("ProximityPrompt") then
+            local action = v.ActionText
+            if action == "Add Gem" or action == "Equip a Gem" then
+                local houseid = v.Parent.Parent.Name
+                local hitid = v.Parent.Name
+                for _, item in pairs(items) do
+                    if item.name == "Diamond" or item.name == "Rollie" or item.name == "Dark Matter Gem" or
+                       item.name == "Diamond Ring" or item.name == "Void Gem" then
+                        FireServer("equip", item.guid)
+                        FireServer("updateGemDisplay", houseid, hitid, item.guid)
+                    end
+                end
+            end
+        end
+    end
+end
+
 task.spawn(function()
     while true do
         task.wait(1)
@@ -1291,7 +1361,7 @@ local Tabs = {
 }
 
 local function getPlayerListValues()
-    local names = {}
+    local names = {"关闭"}
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer then
             table.insert(names, player.Name)
@@ -1341,30 +1411,13 @@ local KillGroup = Tabs.Ohio:AddLeftGroupbox('击杀')
 
 local playerDropdown = KillGroup:AddDropdown('targetPlayers', {
     Text = '选择目标玩家',
-    Desc = '选择一个玩家作为攻击目标（再次点击已选中的可取消）',
+    Desc = '选择"关闭"则攻击所有玩家，选择玩家则只攻击该玩家',
     Values = getPlayerListValues(),
-    Default = '',
+    Default = '关闭',
     Multi = false,
     Callback = function(value)
-        if not value or value == '' then
+        if not value or value == '' or value == '关闭' then
             targetPlayers = {}
-            return
-        end
-        if #targetPlayers > 0 and targetPlayers[1] == value then
-            targetPlayers = {}
-            task.spawn(function()
-                if playerDropdown then
-                    pcall(function()
-                        if playerDropdown.SetValue then
-                            playerDropdown:SetValue('')
-                        elseif playerDropdown.Set then
-                            playerDropdown:Set('')
-                        elseif playerDropdown.Value ~= nil then
-                            playerDropdown.Value = ''
-                        end
-                    end)
-                end
-            end)
             return
         end
         targetPlayers = {}
@@ -1374,6 +1427,27 @@ local playerDropdown = KillGroup:AddDropdown('targetPlayers', {
         end
     end
 })
+
+KillGroup:AddButton('刷新玩家列表', function()
+    local newList = getPlayerListValues()
+    if playerDropdown then
+        pcall(function()
+            -- 方法1: SetValues（Obsidian 标准）
+            if playerDropdown.SetValues then
+                playerDropdown:SetValues(newList)
+            -- 方法2: SetOptions
+            elseif playerDropdown.SetOptions then
+                playerDropdown:SetOptions(newList)
+            -- 方法3: Refresh
+            elseif playerDropdown.Refresh then
+                playerDropdown:Refresh(newList, true)
+            -- 方法4: 直接修改 Values
+            elseif playerDropdown.Values ~= nil then
+                playerDropdown.Values = newList
+            end
+        end)
+    end
+end)
 
 KillGroup:AddDropdown('killMethod', {
     Text = '击杀方式',
@@ -1441,12 +1515,14 @@ task.spawn(function()
         local newList = getPlayerListValues()
         if playerDropdown then
             pcall(function()
-                if playerDropdown.SetOptions then
+                if playerDropdown.SetValues then
+                    playerDropdown:SetValues(newList)
+                elseif playerDropdown.SetOptions then
                     playerDropdown:SetOptions(newList)
                 elseif playerDropdown.Refresh then
                     playerDropdown:Refresh(newList, true)
-                elseif playerDropdown.Set then
-                    playerDropdown:Set(newList)
+                elseif playerDropdown.Values ~= nil then
+                    playerDropdown.Values = newList
                 end
             end)
         end
@@ -1518,6 +1594,44 @@ AutoGroup:AddToggle('idleTeleport', { Text = 'AFK位置', Default = true, Callba
     idleTeleportEnabled = s
     updateIdleConnection()
 end })
+
+AutoGroup:AddToggle('autoCraft', {
+    Text = '自动制作萝莉',
+    Desc = '制作 Rollie 萝莉',
+    Default = false,
+    Callback = function(s)
+        autoCraftEnabled = s
+    end
+})
+AutoGroup:AddToggle('autoClaim', {
+    Text = '自动领取萝莉',
+    Desc = '领取已完成的 Rollie 萝莉',
+    Default = false,
+    Callback = function(s)
+        autoClaimEnabled = s
+    end
+})
+AutoGroup:AddToggle('autoStoreGems', {
+    Text = '自动存放珍贵宝石',
+    Desc = '将钻石、萝莉、暗物质宝石等存放到房屋珠宝柜',
+    Default = false,
+    Callback = function(s)
+        autoStoreGems = s
+    end
+})
+
+AutoGroup:AddToggle('autoReward', {
+    Text = '自动领取奖励',
+    Desc = '自动领取每日奖励和游玩时间奖励',
+    Default = false,
+    Callback = function(s)
+        if s then
+            startAutoRewardLoop()
+        else
+            stopAutoRewardLoop()
+        end
+    end
+})
 
 local FindGroup = Tabs.Ohio:AddRightGroupbox('寻找物品')
 FindGroup:AddToggle('findRare', { Text = '自动寻找稀有物品', Default = false, Callback = function(s) autoxywp = s end })
@@ -1786,9 +1900,22 @@ local function combatTick()
 
     if remls then
         for _, v in pairs(items) do
+            local shouldRemove = false
             if (v.type == "Consumable" and v.subtype == "food" and v.name ~= "Bandage") or
                (v.type == "Throwable" and v.cost < 500 and v.name ~= "Ninja Star" and v.name ~= "Tomahawk" and v.name ~= "Frag") or
                (v.type == "Melee" and v.cost > 100) then
+                shouldRemove = true
+            end
+
+            local garbageItems = {"Topaz", "Emerald Ring", "Topaz Ring", "Amethyst Ring", "Gold Bar", "Emerald"}
+            for _, garbageName in pairs(garbageItems) do
+                if v.name == garbageName then
+                    shouldRemove = true
+                    break
+                end
+            end
+
+            if shouldRemove then
                 FireServer("removeItem", v.guid)
             end
         end
@@ -1835,6 +1962,15 @@ RunService.Heartbeat:Connect(function()
                 LocalPlayer:Kick('[Anti Admin] Admin UserName = '.. p.Name)
             end
         end
+    end
+end)
+
+RunService.Heartbeat:Connect(function()
+    if autoCraftEnabled or autoClaimEnabled then
+        performCrafting()
+    end
+    if autoStoreGems then
+        storeGems()
     end
 end)
 
