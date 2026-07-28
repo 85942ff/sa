@@ -199,6 +199,80 @@ local storeConnection
 local autoRewardEnabled = false
 local autoRewardConnection = nil
 
+local autoCollectTruckCash = false
+local autoCollectTruckCashConnection = nil
+local autoCollectScrap = false
+local autoCollectScrapConnection = nil
+local autoSlotMachine = false
+local autoSlotMachineConnection = nil
+
+local autoStomp = false
+local autoGrab = false
+
+local itemAuraTimer = 0
+local ITEM_AURA_INTERVAL = 0.1
+
+-- 老虎机冷却检测变量
+local slotMachineCooling = false
+local slotMachineCooldownTimer = 0
+local slotMachineCooldownDuration = 1800 -- 30分钟（秒）
+local slotMachineNoWinCount = 0
+local slotMachineMaxNoWin = 2
+local slotMachineLastSpins = 0
+
+local function fastCollectItems(itemNames)
+    local character = LocalPlayer.Character
+    if not character then return end
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    local originalPosition = rootPart.CFrame
+
+    local targetItems = {}
+    for _, l in pairs(workspace.Game.Entities.ItemPickup:GetChildren()) do
+        for _, v in pairs(l:GetChildren()) do
+            if v:IsA("MeshPart") or v:IsA("Part") then
+                for _, e in pairs(v:GetChildren()) do
+                    if e:IsA("ProximityPrompt") then
+                        for _, itemName in ipairs(itemNames) do
+                            if e.ObjectText == itemName then
+                                table.insert(targetItems, {
+                                    cframe = v.CFrame,
+                                    prompt = e
+                                })
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if #targetItems == 0 then
+        return false
+    end
+
+    for _, itemData in pairs(targetItems) do
+        if not autoCollectScrap then break end
+        rootPart.CFrame = itemData.cframe * CFrame.new(0, 2, 0)
+        -- 跳跃
+        local hum = character:FindFirstChild("Humanoid")
+        if hum then
+            hum:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+        task.wait(2)
+        itemData.prompt.RequiresLineOfSight = false
+        itemData.prompt.HoldDuration = 0
+        for i = 1, 5 do
+            fireproximityprompt(itemData.prompt)
+            task.wait(0.01)
+        end
+    end
+
+    rootPart.CFrame = originalPosition
+    return true
+end
+
 local function autoClaimRewards()
     for day = 1, 12 do
         Signal.InvokeServer("claimDailyReward", day)
@@ -1104,12 +1178,19 @@ local valuableItems = {
     "Green Lucky Block", "Red Lucky Block", "Blue Lucky Block",
     "Treasure Map", "Pearl Necklace", "Military Armory Keycard",
     "Police Armory Keycard", "Money Printer", "RPG", "Trident",
-    "Gold Crown", "Gold Cup", "Heavy Vest", "Military Vest"
+    "Gold Crown", "Gold Cup", "Heavy Vest", "Military Vest",
+    "Electronics", "Weapon Parts"
 }
 
 local function startItemAura()
-    itemAuraConnection = RunService.Heartbeat:Connect(function()
+    if itemAuraConnection then itemAuraConnection:Disconnect(); itemAuraConnection = nil end
+    itemAuraTimer = 0
+    itemAuraConnection = RunService.Heartbeat:Connect(function(deltaTime)
         if not itemAuraEnabled then return end
+        itemAuraTimer = itemAuraTimer + deltaTime
+        if itemAuraTimer < ITEM_AURA_INTERVAL then return end
+        itemAuraTimer = 0
+
         local root = getRoot(LocalPlayer.Character)
         if not root then return end
         local itemPickup = workspace.Game.Entities.ItemPickup
@@ -1138,6 +1219,7 @@ local function stopItemAura()
     if itemAuraConnection then
         itemAuraConnection:Disconnect()
         itemAuraConnection = nil
+        itemAuraTimer = 0
     end
 end
 
@@ -1298,6 +1380,46 @@ local function storeGems()
     end
 end
 
+local function stompAura()
+    local character = LocalPlayer.Character
+    if not character then return end
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local targetChar = player.Character
+            local targetHRP = targetChar:FindFirstChild("HumanoidRootPart")
+            local targetHumanoid = targetChar:FindFirstChild("Humanoid")
+            if targetHRP and targetHumanoid and targetHumanoid.Health < 20 then
+                local distance = (rootPart.Position - targetHRP.Position).Magnitude
+                if distance <= 40 then
+                    FireServer("finish", player)
+                end
+            end
+        end
+    end
+end
+
+local function grabAura()
+    local character = LocalPlayer.Character
+    if not character then return end
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local targetChar = player.Character
+            local targetHRP = targetChar:FindFirstChild("HumanoidRootPart")
+            local targetHumanoid = targetChar:FindFirstChild("Humanoid")
+            if targetHRP and targetHumanoid and targetHumanoid.Health < 20 then
+                local distance = (rootPart.Position - targetHRP.Position).Magnitude
+                if distance <= 40 then
+                    FireServer("grabPlayer", player)
+                end
+            end
+        end
+    end
+end
+
 task.spawn(function()
     while true do
         task.wait(1)
@@ -1432,16 +1554,12 @@ KillGroup:AddButton('刷新玩家列表', function()
     local newList = getPlayerListValues()
     if playerDropdown then
         pcall(function()
-            -- 方法1: SetValues（Obsidian 标准）
             if playerDropdown.SetValues then
                 playerDropdown:SetValues(newList)
-            -- 方法2: SetOptions
             elseif playerDropdown.SetOptions then
                 playerDropdown:SetOptions(newList)
-            -- 方法3: Refresh
             elseif playerDropdown.Refresh then
                 playerDropdown:Refresh(newList, true)
-            -- 方法4: 直接修改 Values
             elseif playerDropdown.Values ~= nil then
                 playerDropdown.Values = newList
             end
@@ -1529,17 +1647,208 @@ task.spawn(function()
     end
 end)
 
-local CombatGroup = Tabs.Ohio:AddRightGroupbox('战斗')
+CombatGroup = Tabs.Ohio:AddRightGroupbox('战斗')
 CombatGroup:AddToggle('autoVest', { Text = '自动护甲', Default = false, Callback = function(s) autovest = s end })
 CombatGroup:AddToggle('autoHeal', { Text = '自动回血', Default = false, Callback = function(s) autohealth = s end })
 CombatGroup:AddToggle('autoMask', { Text = '自动口罩', Default = false, Callback = function(s) autokz = s end })
 CombatGroup:AddToggle('phoneSpam', { Text = '电话骚扰', Default = false, Callback = function(s) callphone = s end })
 CombatGroup:AddToggle('arrestAura', { Text = '逮捕光环', Default = false, Callback = function(s) Auarcuff = s end })
+CombatGroup:AddDivider()
+CombatGroup:AddToggle('autoStomp', {
+    Text = '踩踏光环',
+    Desc = '踩踏血量低于20的玩家（距离40）',
+    Default = false,
+    Callback = function(s) autoStomp = s end
+})
+CombatGroup:AddToggle('autoGrab', {
+    Text = '抓取光环',
+    Desc = '抓取血量低于20的玩家（距离40）',
+    Default = false,
+    Callback = function(s) autoGrab = s end
+})
 
-local AutoGroup = Tabs.Ohio:AddLeftGroupbox('自动')
+AutoGroup = Tabs.Ohio:AddLeftGroupbox('自动')
 AutoGroup:AddToggle('autoATM', { Text = '自动摧毁ATM', Default = false, Callback = function(s) FromATM = s end })
 AutoGroup:AddToggle('autoBank', { Text = '自动偷盗银行', Default = false, Callback = function(s) FromBank = s end })
+
+AutoGroup:AddToggle('autoCollectTruckCash', {
+    Text = '自动收集装甲车现金',
+    Desc = '自动收集附近装甲车现金',
+    Default = false,
+    Callback = function(s)
+        autoCollectTruckCash = s
+        if s then
+            task.spawn(function()
+                while autoCollectTruckCash do
+                    local character = LocalPlayer.Character
+                    if not character then task.wait(0.5) break end
+                    local rootPart = character:FindFirstChild("HumanoidRootPart")
+                    if not rootPart then task.wait(0.5) break end
+                    for _, vehicle in pairs(workspace.Game.Vehicles:GetChildren()) do
+                        if not autoCollectTruckCash then break end
+                        if vehicle.Name == "Armored Truck" and vehicle:FindFirstChild("TruckCash") and vehicle:FindFirstChild("PrimaryPart") then
+                            local distance = (rootPart.Position - vehicle.PrimaryPart.Position).magnitude
+                            if distance <= 100 then
+                                local originalCF = rootPart.CFrame
+                                rootPart.CFrame = vehicle.PrimaryPart.CFrame
+                                local truckCash = vehicle:FindFirstChild("TruckCash")
+                                if truckCash and truckCash:FindFirstChild("Main") then
+                                    local prompt = truckCash.Main:FindFirstChild("Attachment")
+                                    if prompt then
+                                        prompt = prompt:FindFirstChild("ProximityPrompt")
+                                        if prompt then
+                                            prompt.RequiresLineOfSight = false
+                                            prompt.HoldDuration = 0
+                                            fireproximityprompt(prompt)
+                                            task.wait(0.5)
+                                        end
+                                    end
+                                end
+                                rootPart.CFrame = originalCF
+                            end
+                        end
+                    end
+                    task.wait(1)
+                end
+            end)
+        end
+    end
+})
+
 AutoGroup:AddToggle('autoJewel', { Text = '自动珠宝店', Default = false, Callback = function(s) autozbd = s end })
+
+AutoGroup:AddToggle('autoCollectScrap', {
+    Text = '自动捡废料',
+    Desc = '传送至废料位置跳跃后等待2秒拾取',
+    Default = false,
+    Callback = function(Value)
+        autoCollectScrap = Value
+        if Value then
+            task.spawn(function()
+                while autoCollectScrap do
+                    local success = fastCollectItems({"Electronics", "Weapon Parts"})
+                    if not success then
+                        task.wait(1)
+                    end
+                    task.wait(0.1)
+                end
+            end)
+        end
+    end
+})
+
+AutoGroup:AddToggle('autoSlotMachine', {
+    Text = '自动老虎机',
+    Desc = '固定6秒，连续2次未中奖则冷却30分钟',
+    Default = false,
+    Callback = function(s)
+        autoSlotMachine = s
+        if s then
+            task.spawn(function()
+                local slotMachineCFrame = CFrame.new(845.6194458007812, 13.917967796325684, -917.5487670898438) * CFrame.new(0, -8, 0)
+                while autoSlotMachine do
+                    -- 如果处于冷却状态，等待冷却时间结束
+                    if slotMachineCooling then
+                        task.wait(1)
+                        slotMachineCooldownTimer = slotMachineCooldownTimer + 1
+                        if slotMachineCooldownTimer >= slotMachineCooldownDuration then
+                            slotMachineCooling = false
+                            slotMachineCooldownTimer = 0
+                            slotMachineNoWinCount = 0
+                        end
+                        continue
+                    end
+
+                    local serverFurniture = workspace:FindFirstChild("ServerFurniture")
+                    local hasSlotMachine = false
+                    if serverFurniture then
+                        for _, furniture in pairs(serverFurniture:GetDescendants()) do
+                            if furniture:GetAttribute("furnitureName") == "SlotMachine" then
+                                hasSlotMachine = true
+                                break
+                            end
+                        end
+                    end
+
+                    if not hasSlotMachine then
+                        task.wait(1)
+                        continue
+                    end
+
+                    local character = LocalPlayer.Character
+                    if not character then task.wait(0.5) break end
+                    local rootPart = character:FindFirstChild("HumanoidRootPart")
+                    if not rootPart then task.wait(0.5) break end
+
+                    local originalCF = rootPart.CFrame
+                    rootPart.CFrame = slotMachineCFrame
+
+                    local lockConnection = RunService.Heartbeat:Connect(function()
+                        if rootPart and rootPart.Parent then
+                            rootPart.CFrame = slotMachineCFrame
+                            rootPart.Velocity = Vector3.zero
+                            rootPart.RotVelocity = Vector3.zero
+                        end
+                    end)
+
+                    -- 记录当前slotSpins
+                    local currentSpins = LocalPlayer:GetAttribute("slotSpins") or 0
+                    local startTime = tick()
+                    local spinChanged = false
+
+                    while autoSlotMachine and (tick() - startTime) < 6 do
+                        if serverFurniture then
+                            for _, furniture in pairs(serverFurniture:GetDescendants()) do
+                                if furniture:GetAttribute("furnitureName") == "SlotMachine" then
+                                    local prompt = furniture:FindFirstChild("Attachment", true)
+                                    if prompt then
+                                        prompt = prompt:FindFirstChild("ProximityPrompt")
+                                        if prompt then
+                                            prompt.MaxActivationDistance = 40
+                                            if (LocalPlayer:GetAttribute("slotSpins") or 0) > 0 then
+                                                fireproximityprompt(prompt)
+                                            end
+                                        end
+                                    end
+                                    break
+                                end
+                            end
+                        end
+                        -- 检查spins是否有变化
+                        local newSpins = LocalPlayer:GetAttribute("slotSpins") or 0
+                        if newSpins ~= currentSpins then
+                            spinChanged = true
+                            currentSpins = newSpins
+                        end
+                        task.wait(0.5)
+                    end
+
+                    if lockConnection then lockConnection:Disconnect() end
+                    rootPart.CFrame = originalCF
+
+                    -- 检查本次固定期间是否中奖（spins减少）
+                    local finalSpins = LocalPlayer:GetAttribute("slotSpins") or 0
+                    if not spinChanged and finalSpins == currentSpins then
+                        slotMachineNoWinCount = slotMachineNoWinCount + 1
+                    else
+                        slotMachineNoWinCount = 0
+                    end
+
+                    -- 如果连续2次未中奖，进入冷却
+                    if slotMachineNoWinCount >= slotMachineMaxNoWin then
+                        slotMachineCooling = true
+                        slotMachineCooldownTimer = 0
+                        slotMachineNoWinCount = 0
+                    end
+
+                    if not autoSlotMachine then break end
+                    task.wait(0.5)
+                end
+            end)
+        end
+    end
+})
+
 AutoGroup:AddToggle('autoTreasure', { Text = '自动藏宝图', Default = false, Callback = function(s) autoTreasure = s end })
 AutoGroup:AddToggle('autoSafe', { Text = '自动打开保险', Default = false, Callback = function(s) autobx = s end })
 AutoGroup:AddToggle('unlockAura', {
@@ -1564,7 +1873,7 @@ AutoGroup:AddToggle('itemAura', { Text = '物品光环', Default = false, Callba
     if s then startItemAura() else stopItemAura() end
 end })
 
-local function autoSellItems()
+function autoSellItems()
     for _, v in pairs(items) do
         if (v.type == "Holdable" and v.subtype == "gem" and v.sellPrice < 5000) or
            (v.subtype == "valuable") or
@@ -1633,7 +1942,7 @@ AutoGroup:AddToggle('autoReward', {
     end
 })
 
-local FindGroup = Tabs.Ohio:AddRightGroupbox('寻找物品')
+FindGroup = Tabs.Ohio:AddRightGroupbox('寻找物品')
 FindGroup:AddToggle('findRare', { Text = '自动寻找稀有物品', Default = false, Callback = function(s) autoxywp = s end })
 FindGroup:AddToggle('findBalloon', { Text = '自动寻找气球', Default = false, Callback = function(s) FromBalloon = s end })
 FindGroup:AddToggle('findPrinter', { Text = '自动寻找印钞机', Default = false, Callback = function(s) automoney = s end })
@@ -1643,9 +1952,9 @@ FindGroup:AddToggle('findPresents', { Text = '自动寻找礼物', Default = fal
 FindGroup:AddToggle('findBlocks', { Text = '自动寻找幸运方块', Default = false, Callback = function(s) autoblock = s end })
 FindGroup:AddToggle('findCard', { Text = '自动寻找红卡', Default = false, Callback = function(s) card = s end })
 
-local CounterGroup = Tabs.Ohio:AddLeftGroupbox('反制')
+CounterGroup = Tabs.Ohio:AddLeftGroupbox('反制')
 CounterGroup:AddButton('重新进入服务器', function() game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer) end)
-local toastMsg, toastTime = "", 5
+toastMsg, toastTime = "", 5
 CounterGroup:AddInput('toastMsg', { Text = '弹窗内容', Default = '', Callback = function(v) toastMsg = v end })
 CounterGroup:AddInput('toastTime', { Text = '弹窗时长(秒)', Default = '5', Callback = function(v) toastTime = tonumber(v) or 5 end })
 CounterGroup:AddButton('发送弹窗', function() loadModule("makeToast")(toastMsg, "rainbow", toastTime) end)
@@ -1678,7 +1987,7 @@ end)
 CounterGroup:AddToggle('antiDoll', { Text = '反布娃娃', Default = false, Callback = function(s) AntiDoll = s end })
 CounterGroup:AddToggle('antiAdmin', { Text = '反管理', Default = false, Callback = function(s) AntiAdmin = s end })
 
-local BypassGroup = Tabs.Ohio:AddRightGroupbox('绕过')
+BypassGroup = Tabs.Ohio:AddRightGroupbox('绕过')
 BypassGroup:AddInput('fakeMoney', { Text = '伪装金钱数量', Default = '', Callback = function(v) fakemoney = tonumber(v) or 0 end })
 BypassGroup:AddToggle('fakeMoneyToggle', { Text = '开启伪装', Default = false, Callback = function(s)
     openfake = s
@@ -1746,7 +2055,7 @@ BypassGroup:AddButton('绕过火&酸伤害', function()
     if acid then acid:Destroy() end
 end)
 
-local WeaponGroup = Tabs.Ohio:AddLeftGroupbox('武器')
+WeaponGroup = Tabs.Ohio:AddLeftGroupbox('武器')
 WeaponGroup:AddToggle('silentAim', { Text = '静默自瞄', Default = false, Callback = function(s) silentaim = s end })
 WeaponGroup:AddButton('全枪无后座', function()
     for _, v in game:GetDescendants() do if v:IsA("ParticleEmitter") then v:Destroy() end end
@@ -1783,7 +2092,7 @@ WeaponGroup:AddButton('快速换弹', function()
     end
 end)
 
-local MenuGroup = Tabs["UI Settings"]:AddLeftGroupbox("Debug")
+MenuGroup = Tabs["UI Settings"]:AddLeftGroupbox("Debug")
 MenuGroup:AddToggle("KeybindMenuOpen", {
     Default = Library.KeybindFrame.Visible,
     Text = "shortcut menu",
@@ -1827,7 +2136,7 @@ SaveManager:LoadAutoloadConfig()
 
 updateIdleConnection()
 
-local function combatTick()
+function combatTick()
     if autouse then
         for _, v in pairs(items) do
             if v.type == "Consumable" and v.subtype ~= "vest" and v.subtype ~= "food" and v.name ~= "Lockpick" then
@@ -1899,22 +2208,34 @@ local function combatTick()
     end
 
     if remls then
+        local garbageItems = {"Topaz", "Emerald Ring", "Topaz Ring", "Amethyst Ring", "Gold Bar", "Emerald"}
+        local keepThrowables = {"Ninja Star", "Tomahawk", "Frag", "Banana Peel"}
         for _, v in pairs(items) do
             local shouldRemove = false
-            if (v.type == "Consumable" and v.subtype == "food" and v.name ~= "Bandage") or
-               (v.type == "Throwable" and v.cost < 500 and v.name ~= "Ninja Star" and v.name ~= "Tomahawk" and v.name ~= "Frag") or
-               (v.type == "Melee" and v.cost > 100) then
+            if v.type == "Consumable" and v.subtype == "food" then
                 shouldRemove = true
             end
-
-            local garbageItems = {"Topaz", "Emerald Ring", "Topaz Ring", "Amethyst Ring", "Gold Bar", "Emerald"}
+            if v.type == "Melee" then
+                shouldRemove = true
+            end
+            if v.type == "Throwable" then
+                local isKept = false
+                for _, keepName in pairs(keepThrowables) do
+                    if v.name == keepName then
+                        isKept = true
+                        break
+                    end
+                end
+                if not isKept then
+                    shouldRemove = true
+                end
+            end
             for _, garbageName in pairs(garbageItems) do
                 if v.name == garbageName then
                     shouldRemove = true
                     break
                 end
             end
-
             if shouldRemove then
                 FireServer("removeItem", v.guid)
             end
@@ -1942,6 +2263,14 @@ local function combatTick()
                 end
             end
         end
+    end
+
+    if autoStomp then
+        stompAura()
+    end
+
+    if autoGrab then
+        grabAura()
     end
 end
 
