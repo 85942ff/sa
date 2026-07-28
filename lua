@@ -51,8 +51,24 @@ local function GUID()
     return devv.load("GUID")()
 end
 
+-- ===== 挂机位置配置 =====
+-- 宿傩 和 位置2 的坐标已互换
+local idleLocations = {
+    ["TeTraX"] = CFrame.new(1653.397216796875, -16.95315170288086, -530.3738403320312),
+    ["宿傩"] = CFrame.new(121.4214859008789, -42.42018508911133, -515.8087158203125),
+    ["位置1"] = CFrame.new(439.01190185546875, -25.120525360107422, -822.7509155273438),
+    ["位置2"] = CFrame.new(254.45443725585938, -127.82054138183594, -426.7384033203125),
+    ["位置3"] = CFrame.new(490.7265930175781, -22.4210262298584, -272.43170166015625),
+    ["位置4"] = CFrame.new(160.63153076171875, -33.42034912109375, -445.28424072265625)
+}
+local currentIdleName = "TeTraX"
+local currentMode = "AFK"
+local function getCurrentIdleCF()
+    return idleLocations[currentIdleName] or idleLocations["TeTraX"]
+end
+-- ==============================
+
 local maskBaseLocation = CFrame.new(604.114014, 5.09485245, -1018.1275)
-local idleLocation = CFrame.new(1653.397216796875, -16.95315170288086, -530.3738403320312)
 local grenadeBuyLocation = CFrame.new(659.044739, 5.77163315, -706.697632, -1.1920929e-07, 0, -1.00000012, 0, 1, 0, 1.00000012, 0, -1.1920929e-07)
 local bombThrowLocation = CFrame.new(1129.0994873046875, 14.843579292297363, -354.19488525390625)
 local bombTargetPosition = Vector3.new(1124.0853271484, 5.3128666877747, -357.68710327148)
@@ -60,7 +76,6 @@ local afterExplosionWaitLocation = CFrame.new(1112.95142, 16.6149864, -331.99646
 local lockpickBuyLocation = CFrame.new(659.280029, 5.50683689, -716.48999, -1.1920929e-07, 0, -1.00000012, 0, 1, 0, 1.00000012, 0, -1.1920929e-07)
 local vestBuyLocation = CFrame.new(659.063477, 6.21583509, -684.365051, -1.1920929e-07, 0, -1.00000012, 0, 1, 0, 1.00000012, 0, -1.1920929e-07)
 local bandageBuyLocation = CFrame.new(1168.04468, 25.0443974, -972.782654, 0, 0, -1, 0, 1, 0, 1, 0, 0)
-
 local flamethrowerBuyLocation = CFrame.new(1658.28564, 24.541769, -499.186249, 0, 0, -1, 0, 1, 0, 1, 0, 0)
 
 local throwBuyLocations = {
@@ -150,7 +165,6 @@ local selectedGun = "Raygun"
 local bladeid
 local openfake, fakemoney = false, 0
 local AntiDoll, AntiAdmin = false, false
-local idleTeleportEnabled = true
 local busy = false
 local maskBuying = false
 
@@ -814,7 +828,9 @@ local function buyMaskIfNeeded()
         while not char:FindFirstChild("Black Bandana") and tick() - startTime < 2 do
             task.wait(0.1)
         end
-        root.CFrame = idleLocation
+        if currentMode == "AFK" then
+            root.CFrame = getCurrentIdleCF()
+        end
     end
     maskBuying = false
 end
@@ -856,7 +872,9 @@ local function runATMPhase()
     task.wait(1.4)
 
     if lockConn then lockConn:Disconnect() end
-    root.CFrame = idleLocation
+    if currentMode == "AFK" then
+        root.CFrame = getCurrentIdleCF()
+    end
 end
 
 local function ensureItem(itemName, buyLocation)
@@ -933,7 +951,9 @@ local function tryBankHeist()
     if cashConnection then cashConnection:Disconnect() end
 
     root = getRoot(LocalPlayer.Character)
-    if root then root.CFrame = idleLocation end
+    if root and currentMode == "AFK" then
+        root.CFrame = getCurrentIdleCF()
+    end
     return true
 end
 
@@ -992,8 +1012,8 @@ local function runTreasurePhase()
         end
     end
 
-    if root and root.Parent then
-        root.CFrame = idleLocation
+    if root and root.Parent and currentMode == "AFK" then
+        root.CFrame = getCurrentIdleCF()
     end
     return true
 end
@@ -1087,7 +1107,9 @@ local function runSafePhase()
                             task.wait(3.0)
 
                             if lockConn then lockConn:Disconnect() end
-                            root.CFrame = idleLocation
+                            if currentMode == "AFK" then
+                                root.CFrame = getCurrentIdleCF()
+                            end
                             return true
                         end
                     end
@@ -1220,14 +1242,16 @@ local function stopItemAura()
     end
 end
 
+-- 更新 idle 连接：AFK 模式强制传送，Normal 模式不传送
 local function updateIdleConnection()
     if idleConnection then idleConnection:Disconnect(); idleConnection = nil end
-    if idleTeleportEnabled then
+    if currentMode == "AFK" then
+        local targetCF = getCurrentIdleCF()
         idleConnection = RunService.Heartbeat:Connect(function()
             if not busy and not maskBuying then
                 local root = getRoot(LocalPlayer.Character)
                 if root and root.Parent then
-                    root.CFrame = idleLocation
+                    root.CFrame = targetCF
                     root.Velocity = Vector3.zero
                     root.RotVelocity = Vector3.zero
                 end
@@ -1471,696 +1495,742 @@ task.spawn(function()
     end
 end)
 
-local Tabs = {
-    Player = Window:AddTab('玩家', 'user'),
-    Visual = Window:AddTab('视觉', 'eye'),
-    Ohio = Window:AddTab('主要', 'crosshair'),
-    SpecialAttack = Window:AddTab('特殊攻击', 'zap'),
-    ["UI Settings"] = Window:AddTab('UI 调试', 'settings')
-}
+local function setupUI()
+    local Tabs = {
+        Player = Window:AddTab('玩家', 'user'),
+        Visual = Window:AddTab('视觉', 'eye'),
+        Ohio = Window:AddTab('主要', 'crosshair'),
+        SpecialAttack = Window:AddTab('特殊攻击', 'zap'),
+        ["UI Settings"] = Window:AddTab('UI 调试', 'settings')
+    }
 
-local function getPlayerListValues()
-    local names = {"关闭"}
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            table.insert(names, player.Name)
+    local function getPlayerListValues()
+        local names = {"关闭"}
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                table.insert(names, player.Name)
+            end
         end
+        return names
     end
-    return names
-end
 
-local SpecialGroup1 = Tabs.SpecialAttack:AddLeftGroupbox('火焰/酸液攻击')
-SpecialGroup1:AddSlider('flameDistance', {
-    Text = '攻击距离',
-    Min = 1,
-    Max = 10000,
-    Default = 10000,
-    Callback = function(v) flameAttackDistance = v end
-})
-SpecialGroup1:AddToggle('flameAttack', {
-    Text = '火焰/酸液攻击',
-    Default = false,
-    Callback = function(s)
-        flameAttackEnabled = s
-        if s then
-            startFlameAttack()
-        end
+    do
+        local SpecialGroup1 = Tabs.SpecialAttack:AddLeftGroupbox('火焰/酸液攻击')
+        SpecialGroup1:AddSlider('flameDistance', {
+            Text = '攻击距离',
+            Min = 1,
+            Max = 10000,
+            Default = 10000,
+            Callback = function(v) flameAttackDistance = v end
+        })
+        SpecialGroup1:AddToggle('flameAttack', {
+            Text = '火焰/酸液攻击',
+            Default = false,
+            Callback = function(s)
+                flameAttackEnabled = s
+                if s then
+                    startFlameAttack()
+                end
+            end
+        })
     end
-})
 
-local PlayerGroup = Tabs.Player:AddLeftGroupbox('移动')
-PlayerGroup:AddSlider('flySpeed', { Text = '飞行速度', Min = 10, Max = 200, Default = 50, Callback = function(v) flySpeed = v end })
-PlayerGroup:AddToggle('flyToggle', { Text = '飞行模式（谨慎使用）', Default = false, Callback = function(s) if s then startFly() else stopFly() end end })
-PlayerGroup:AddSlider('moveSpeed', { Text = '移动速度', Min = 1, Max = 1000, Default = 10, Callback = function(v) currentSpeed = v end })
-PlayerGroup:AddToggle('speedToggle', { Text = '加速', Default = false, Callback = function(s) if s then startTPWalk() else stopTPWalk() end end })
-
-local PlayerGroup2 = Tabs.Player:AddRightGroupbox('角色')
-PlayerGroup2:AddToggle('transparentToggle', { Text = '透明', Default = false, Callback = toggleTransparent })
-PlayerGroup2:AddToggle('bunnyHopToggle', { Text = '连跳', Default = false, Callback = toggleBunnyHop })
-PlayerGroup2:AddToggle('noClipToggle', { Text = '穿墙', Default = false, Callback = toggleNoClip })
-PlayerGroup2:AddToggle('antiVoidToggle', { Text = '防虚空掉落', Default = false, Callback = toggleAntiVoid })
-
-local VisualGroup = Tabs.Visual:AddLeftGroupbox('ESP 设置')
-VisualGroup:AddToggle('espMaster', { Text = '开启 ESP', Default = false, Callback = toggleESP })
-VisualGroup:AddToggle('espName', { Text = '显示玩家名', Default = true, Callback = function(s) DrawingConfig.NameEnabled = s end })
-VisualGroup:AddToggle('espDist', { Text = '显示距离', Default = true, Callback = function(s) DrawingConfig.DistanceEnabled = s end })
-VisualGroup:AddToggle('espHP', { Text = '显示 HP', Default = true, Callback = function(s) DrawingConfig.HealthText = s end })
-
-local KillGroup = Tabs.Ohio:AddLeftGroupbox('击杀')
-
-local playerDropdown = KillGroup:AddDropdown('targetPlayers', {
-    Text = '选择目标玩家',
-    Desc = '选择"关闭"则攻击所有玩家，选择玩家则只攻击该玩家',
-    Values = getPlayerListValues(),
-    Default = '关闭',
-    Multi = false,
-    Callback = function(value)
-        if not value or value == '' or value == '关闭' then
-            targetPlayers = {}
-            return
-        end
-        targetPlayers = {}
-        local player = Players:FindFirstChild(value)
-        if player then
-            table.insert(targetPlayers, value)
-        end
+    do
+        local PlayerGroup = Tabs.Player:AddLeftGroupbox('移动')
+        PlayerGroup:AddSlider('flySpeed', { Text = '飞行速度', Min = 10, Max = 200, Default = 50, Callback = function(v) flySpeed = v end })
+        PlayerGroup:AddToggle('flyToggle', { Text = '飞行模式（谨慎使用）', Default = false, Callback = function(s) if s then startFly() else stopFly() end end })
+        PlayerGroup:AddSlider('moveSpeed', { Text = '移动速度', Min = 1, Max = 1000, Default = 10, Callback = function(v) currentSpeed = v end })
+        PlayerGroup:AddToggle('speedToggle', { Text = '加速', Default = false, Callback = function(s) if s then startTPWalk() else stopTPWalk() end end })
     end
-})
 
-KillGroup:AddButton('刷新玩家列表', function()
-    local newList = getPlayerListValues()
-    if playerDropdown then
-        pcall(function()
-            if playerDropdown.SetValues then
-                playerDropdown:SetValues(newList)
-            elseif playerDropdown.SetOptions then
-                playerDropdown:SetOptions(newList)
-            elseif playerDropdown.Refresh then
-                playerDropdown:Refresh(newList, true)
-            elseif playerDropdown.Values ~= nil then
-                playerDropdown.Values = newList
+    do
+        local PlayerGroup2 = Tabs.Player:AddRightGroupbox('角色')
+        PlayerGroup2:AddToggle('transparentToggle', { Text = '透明', Default = false, Callback = toggleTransparent })
+        PlayerGroup2:AddToggle('bunnyHopToggle', { Text = '连跳', Default = false, Callback = toggleBunnyHop })
+        PlayerGroup2:AddToggle('noClipToggle', { Text = '穿墙', Default = false, Callback = toggleNoClip })
+        PlayerGroup2:AddToggle('antiVoidToggle', { Text = '防虚空掉落', Default = false, Callback = toggleAntiVoid })
+    end
+
+    do
+        local VisualGroup = Tabs.Visual:AddLeftGroupbox('ESP 设置')
+        VisualGroup:AddToggle('espMaster', { Text = '开启 ESP', Default = false, Callback = toggleESP })
+        VisualGroup:AddToggle('espName', { Text = '显示玩家名', Default = true, Callback = function(s) DrawingConfig.NameEnabled = s end })
+        VisualGroup:AddToggle('espDist', { Text = '显示距离', Default = true, Callback = function(s) DrawingConfig.DistanceEnabled = s end })
+        VisualGroup:AddToggle('espHP', { Text = '显示 HP', Default = true, Callback = function(s) DrawingConfig.HealthText = s end })
+    end
+
+    do
+        local KillGroup = Tabs.Ohio:AddLeftGroupbox('击杀')
+        local playerDropdown = KillGroup:AddDropdown('targetPlayers', {
+            Text = '选择目标玩家',
+            Desc = '选择"关闭"则攻击所有玩家，选择玩家则只攻击该玩家',
+            Values = getPlayerListValues(),
+            Default = '关闭',
+            Multi = false,
+            Callback = function(value)
+                if not value or value == '' or value == '关闭' then
+                    targetPlayers = {}
+                    return
+                end
+                targetPlayers = {}
+                local player = Players:FindFirstChild(value)
+                if player then
+                    table.insert(targetPlayers, value)
+                end
+            end
+        })
+
+        KillGroup:AddButton('刷新玩家列表', function()
+            local newList = getPlayerListValues()
+            if playerDropdown then
+                pcall(function()
+                    if playerDropdown.SetValues then
+                        playerDropdown:SetValues(newList)
+                    elseif playerDropdown.SetOptions then
+                        playerDropdown:SetOptions(newList)
+                    elseif playerDropdown.Refresh then
+                        playerDropdown:Refresh(newList, true)
+                    elseif playerDropdown.Values ~= nil then
+                        playerDropdown.Values = newList
+                    end
+                end)
             end
         end)
-    end
-end)
 
-KillGroup:AddDropdown('killMethod', {
-    Text = '击杀方式',
-    Values = {'Ninja Star', 'Tomahawk', 'Banana Peel', 'Gun Kill'},
-    Default = 'Ninja Star',
-    Multi = false,
-    Callback = function(v)
-        selectedWeapon = (v[1] or v)
+        KillGroup:AddDropdown('killMethod', {
+            Text = '击杀方式',
+            Values = {'Ninja Star', 'Tomahawk', 'Banana Peel', 'Gun Kill'},
+            Default = 'Ninja Star',
+            Multi = false,
+            Callback = function(v)
+                selectedWeapon = (v[1] or v)
+            end
+        })
+        KillGroup:AddDropdown('gunSelect', {
+            Text = '选择枪械',
+            Values = {'Raygun', 'M4A1', 'AK47'},
+            Default = 'Raygun',
+            Multi = false,
+            Callback = function(v)
+                selectedGun = (v[1] or v)
+            end
+        })
+        KillGroup:AddToggle('autoKill', {
+            Text = '自动击杀',
+            Default = false,
+            Callback = function(s)
+                aurablade = s
+                if s then prepareWeapon() end
+                updateAuraConnection()
+            end
+        })
+        KillGroup:AddToggle('tpPlayer', {
+            Text = 'TP玩家',
+            Default = false,
+            Callback = function(s) tpplayfb = s; updateAuraConnection() end
+        })
+        KillGroup:AddSlider('fbx', { Text = 'X 偏移', Min = -20, Max = 20, Default = 0, Callback = function(v) fbx = v end })
+        KillGroup:AddSlider('fby', { Text = 'Y 偏移', Min = -20, Max = 20, Default = 0, Callback = function(v) fby = v end })
+        KillGroup:AddSlider('fbz', { Text = 'Z 偏移', Min = -20, Max = 20, Default = 5, Callback = function(v) fbz = v end })
     end
-})
-KillGroup:AddDropdown('gunSelect', {
-    Text = '选择枪械',
-    Values = {'Raygun', 'M4A1', 'AK47'},
-    Default = 'Raygun',
-    Multi = false,
-    Callback = function(v)
-        selectedGun = (v[1] or v)
-    end
-})
-KillGroup:AddToggle('autoKill', {
-    Text = '自动击杀',
-    Default = false,
-    Callback = function(s)
-        aurablade = s
-        if s then prepareWeapon() end
-        updateAuraConnection()
-    end
-})
-KillGroup:AddToggle('tpPlayer', {
-    Text = 'TP玩家',
-    Default = false,
-    Callback = function(s) tpplayfb = s; updateAuraConnection() end
-})
-KillGroup:AddSlider('fbx', { Text = 'X 偏移', Min = -20, Max = 20, Default = 0, Callback = function(v) fbx = v end })
-KillGroup:AddSlider('fby', { Text = 'Y 偏移', Min = -20, Max = 20, Default = 0, Callback = function(v) fby = v end })
-KillGroup:AddSlider('fbz', { Text = 'Z 偏移', Min = -20, Max = 20, Default = 5, Callback = function(v) fbz = v end })
 
-local AmmoGroup = Tabs.Ohio:AddRightGroupbox('弹药自动购买')
-AmmoGroup:AddToggle('autoBuyGunAmmo', {
-    Text = '击杀枪自动买弹药（M4/AK）',
-    Desc = '每10秒传送购买大量弹药',
-    Default = false,
-    Callback = function(s)
-        autoBuyGunAmmo = s
-        if s then
-            gunBuyTimer = 0
-        end
-    end
-})
-AmmoGroup:AddToggle('autoBuyFlameAmmo', {
-    Text = '火枪自动买弹药（火焰/酸液）',
-    Desc = '每10秒传送购买大量弹药',
-    Default = false,
-    Callback = function(s)
-        autoBuyFlameAmmo = s
-        if s then
-            flameBuyTimer = 0
-        end
-    end
-})
-
-task.spawn(function()
-    while true do
-        task.wait(0.5)
-        local newList = getPlayerListValues()
-        if playerDropdown then
-            pcall(function()
-                if playerDropdown.SetValues then
-                    playerDropdown:SetValues(newList)
-                elseif playerDropdown.SetOptions then
-                    playerDropdown:SetOptions(newList)
-                elseif playerDropdown.Refresh then
-                    playerDropdown:Refresh(newList, true)
-                elseif playerDropdown.Values ~= nil then
-                    playerDropdown.Values = newList
+    do
+        local AmmoGroup = Tabs.Ohio:AddRightGroupbox('弹药自动购买')
+        AmmoGroup:AddToggle('autoBuyGunAmmo', {
+            Text = '击杀枪自动买弹药（M4/AK）',
+            Desc = '每10秒传送购买大量弹药',
+            Default = false,
+            Callback = function(s)
+                autoBuyGunAmmo = s
+                if s then
+                    gunBuyTimer = 0
                 end
-            end)
-        end
-    end
-end)
-
-CombatGroup = Tabs.Ohio:AddRightGroupbox('战斗')
-CombatGroup:AddToggle('autoVest', { Text = '自动护甲', Default = false, Callback = function(s) autovest = s end })
-CombatGroup:AddToggle('autoHeal', { Text = '自动回血', Default = false, Callback = function(s) autohealth = s end })
-CombatGroup:AddToggle('autoMask', { Text = '自动口罩', Default = false, Callback = function(s) autokz = s end })
-CombatGroup:AddToggle('phoneSpam', { Text = '电话骚扰', Default = false, Callback = function(s) callphone = s end })
-CombatGroup:AddToggle('arrestAura', { Text = '逮捕光环', Default = false, Callback = function(s) Auarcuff = s end })
-CombatGroup:AddDivider()
-CombatGroup:AddToggle('autoStomp', {
-    Text = '踩踏光环',
-    Desc = '踩踏血量低于20的玩家（距离40）',
-    Default = false,
-    Callback = function(s) autoStomp = s end
-})
-CombatGroup:AddToggle('autoGrab', {
-    Text = '抓取光环',
-    Desc = '抓取血量低于20的玩家（距离40）',
-    Default = false,
-    Callback = function(s) autoGrab = s end
-})
-
-AutoGroup = Tabs.Ohio:AddLeftGroupbox('自动')
-AutoGroup:AddToggle('autoATM', { Text = '自动摧毁ATM', Default = false, Callback = function(s) FromATM = s end })
-AutoGroup:AddToggle('autoBank', { Text = '自动偷盗银行', Default = false, Callback = function(s) FromBank = s end })
-
-AutoGroup:AddToggle('autoCollectTruckCash', {
-    Text = '自动收集装甲车现金',
-    Desc = '自动收集附近装甲车现金',
-    Default = false,
-    Callback = function(s)
-        autoCollectTruckCash = s
-        if s then
-            task.spawn(function()
-                while autoCollectTruckCash do
-                    local character = LocalPlayer.Character
-                    if not character then task.wait(0.5) break end
-                    local rootPart = character:FindFirstChild("HumanoidRootPart")
-                    if not rootPart then task.wait(0.5) break end
-                    for _, vehicle in pairs(workspace.Game.Vehicles:GetChildren()) do
-                        if not autoCollectTruckCash then break end
-                        if vehicle.Name == "Armored Truck" and vehicle:FindFirstChild("TruckCash") and vehicle:FindFirstChild("PrimaryPart") then
-                            local distance = (rootPart.Position - vehicle.PrimaryPart.Position).magnitude
-                            if distance <= 100 then
-                                local originalCF = rootPart.CFrame
-                                rootPart.CFrame = vehicle.PrimaryPart.CFrame
-                                local truckCash = vehicle:FindFirstChild("TruckCash")
-                                if truckCash and truckCash:FindFirstChild("Main") then
-                                    local prompt = truckCash.Main:FindFirstChild("Attachment")
-                                    if prompt then
-                                        prompt = prompt:FindFirstChild("ProximityPrompt")
-                                        if prompt then
-                                            prompt.RequiresLineOfSight = false
-                                            prompt.HoldDuration = 0
-                                            fireproximityprompt(prompt)
-                                            task.wait(0.5)
-                                        end
-                                    end
-                                end
-                                rootPart.CFrame = originalCF
-                            end
-                        end
-                    end
-                    task.wait(1)
+            end
+        })
+        AmmoGroup:AddToggle('autoBuyFlameAmmo', {
+            Text = '火枪自动买弹药（火焰/酸液）',
+            Desc = '每10秒传送购买大量弹药',
+            Default = false,
+            Callback = function(s)
+                autoBuyFlameAmmo = s
+                if s then
+                    flameBuyTimer = 0
                 end
-            end)
-        end
+            end
+        })
     end
-})
 
-AutoGroup:AddToggle('autoJewel', { Text = '自动珠宝店', Default = false, Callback = function(s) autozbd = s end })
-
--- 自动捡废料：只在空闲时工作，不强制传送
-AutoGroup:AddToggle('autoCollectScrap', {
-    Text = '自动捡废料',
-    Desc = '传送至废料位置跳跃后等待2秒拾取',
-    Default = false,
-    Callback = function(Value)
-        autoCollectScrap = Value
-        if Value then
-            task.spawn(function()
-                while autoCollectScrap do
-                    -- 检查是否有任何高优先级任务正在运行
-                    if FromATM or FromBank or autobx or autozbd or autoTreasure or autoblock or automoss or autoxybs or autoxywp or autoptbs or automoney or card then
-                        task.wait(1)
-                        continue
-                    end
-                    busy = true
-                    local success = fastCollectItems({"Electronics", "Weapon Parts"})
-                    if not success then
-                        task.wait(1)
-                    end
-                    busy = false
-                    task.wait(0.1)
-                end
-            end)
-        else
-            busy = false
-        end
-    end
-})
-
--- 自动老虎机：只在空闲时工作，不强制传送
-AutoGroup:AddToggle('autoSlotMachine', {
-    Text = '自动老虎机',
-    Desc = '固定6秒，连续2次未中奖则冷却30分钟',
-    Default = false,
-    Callback = function(s)
-        autoSlotMachine = s
-        if s then
-            task.spawn(function()
-                local slotMachineCFrame = CFrame.new(845.6194458007812, 13.917967796325684, -917.5487670898438) * CFrame.new(0, -8, 0)
-                while autoSlotMachine do
-                    -- 检查是否有任何高优先级任务正在运行
-                    if FromATM or FromBank or autobx or autozbd or autoTreasure or autoblock or automoss or autoxybs or autoxywp or autoptbs or automoney or card then
-                        task.wait(1)
-                        continue
-                    end
-                    busy = true
-                    if slotMachineCooling then
-                        task.wait(1)
-                        slotMachineCooldownTimer = slotMachineCooldownTimer + 1
-                        if slotMachineCooldownTimer >= slotMachineCooldownDuration then
-                            slotMachineCooling = false
-                            slotMachineCooldownTimer = 0
-                            slotMachineNoWinCount = 0
-                        end
-                        busy = false
-                        continue
-                    end
-
-                    local serverFurniture = workspace:FindFirstChild("ServerFurniture")
-                    local hasSlotMachine = false
-                    if serverFurniture then
-                        for _, furniture in pairs(serverFurniture:GetDescendants()) do
-                            if furniture:GetAttribute("furnitureName") == "SlotMachine" then
-                                hasSlotMachine = true
-                                break
-                            end
-                        end
-                    end
-
-                    if not hasSlotMachine then
-                        task.wait(1)
-                        busy = false
-                        continue
-                    end
-
-                    local character = LocalPlayer.Character
-                    if not character then
-                        busy = false
-                        task.wait(0.5)
-                        continue
-                    end
-                    local rootPart = character:FindFirstChild("HumanoidRootPart")
-                    if not rootPart then
-                        busy = false
-                        task.wait(0.5)
-                        continue
-                    end
-
-                    rootPart.CFrame = slotMachineCFrame
-
-                    local lockConnection = RunService.Heartbeat:Connect(function()
-                        if rootPart and rootPart.Parent then
-                            rootPart.CFrame = slotMachineCFrame
-                            rootPart.Velocity = Vector3.zero
-                            rootPart.RotVelocity = Vector3.zero
+    task.spawn(function()
+        while true do
+            task.wait(0.5)
+            local newList = getPlayerListValues()
+            local killGroup = Tabs.Ohio:GetGroupbox('击杀')
+            if killGroup then
+                local dropdown = killGroup:GetDropdown('targetPlayers')
+                if dropdown then
+                    pcall(function()
+                        if dropdown.SetValues then
+                            dropdown:SetValues(newList)
+                        elseif dropdown.SetOptions then
+                            dropdown:SetOptions(newList)
+                        elseif dropdown.Refresh then
+                            dropdown:Refresh(newList, true)
+                        elseif dropdown.Values ~= nil then
+                            dropdown.Values = newList
                         end
                     end)
+                end
+            end
+        end
+    end)
 
-                    local currentSpins = LocalPlayer:GetAttribute("slotSpins") or 0
-                    local startTime = tick()
-                    local spinChanged = false
+    do
+        local CombatGroup = Tabs.Ohio:AddRightGroupbox('战斗')
+        CombatGroup:AddToggle('autoVest', { Text = '自动护甲', Default = false, Callback = function(s) autovest = s end })
+        CombatGroup:AddToggle('autoHeal', { Text = '自动回血', Default = false, Callback = function(s) autohealth = s end })
+        CombatGroup:AddToggle('autoMask', { Text = '自动口罩', Default = false, Callback = function(s) autokz = s end })
+        CombatGroup:AddToggle('phoneSpam', { Text = '电话骚扰', Default = false, Callback = function(s) callphone = s end })
+        CombatGroup:AddToggle('arrestAura', { Text = '逮捕光环', Default = false, Callback = function(s) Auarcuff = s end })
+        CombatGroup:AddDivider()
+        CombatGroup:AddToggle('autoStomp', {
+            Text = '踩踏光环',
+            Desc = '踩踏血量低于20的玩家（距离40）',
+            Default = false,
+            Callback = function(s) autoStomp = s end
+        })
+        CombatGroup:AddToggle('autoGrab', {
+            Text = '抓取光环',
+            Desc = '抓取血量低于20的玩家（距离40）',
+            Default = false,
+            Callback = function(s) autoGrab = s end
+        })
+    end
 
-                    while autoSlotMachine and (tick() - startTime) < 6 do
-                        if serverFurniture then
-                            for _, furniture in pairs(serverFurniture:GetDescendants()) do
-                                if furniture:GetAttribute("furnitureName") == "SlotMachine" then
-                                    local prompt = furniture:FindFirstChild("Attachment", true)
-                                    if prompt then
-                                        prompt = prompt:FindFirstChild("ProximityPrompt")
-                                        if prompt then
-                                            prompt.MaxActivationDistance = 40
-                                            if (LocalPlayer:GetAttribute("slotSpins") or 0) > 0 then
-                                                fireproximityprompt(prompt)
+    do
+        local AutoGroup = Tabs.Ohio:AddLeftGroupbox('自动')
+
+        -- 农场模式选择（原挂机模式选择，已改名）
+        AutoGroup:AddDropdown('modeSelect', {
+            Text = '农场模式',
+            Values = {'AFK', 'Normal'},
+            Default = 'AFK',
+            Callback = function(v)
+                currentMode = v
+                updateIdleConnection()
+            end
+        })
+        AutoGroup:AddDropdown('idleSelect', {
+            Text = '挂机位置',
+            Values = {'TeTraX', '宿傩', '位置1', '位置2', '位置3', '位置4'},
+            Default = 'TeTraX',
+            Callback = function(v)
+                currentIdleName = v
+                updateIdleConnection()
+            end
+        })
+        AutoGroup:AddDivider()
+
+        AutoGroup:AddToggle('autoATM', { Text = '自动摧毁ATM', Default = false, Callback = function(s) FromATM = s end })
+        AutoGroup:AddToggle('autoBank', { Text = '自动偷盗银行', Default = false, Callback = function(s) FromBank = s end })
+
+        AutoGroup:AddToggle('autoCollectTruckCash', {
+            Text = '自动收集装甲车现金',
+            Desc = '自动收集附近装甲车现金',
+            Default = false,
+            Callback = function(s)
+                autoCollectTruckCash = s
+                if s then
+                    task.spawn(function()
+                        while autoCollectTruckCash do
+                            local character = LocalPlayer.Character
+                            if not character then task.wait(0.5) break end
+                            local rootPart = character:FindFirstChild("HumanoidRootPart")
+                            if not rootPart then task.wait(0.5) break end
+                            for _, vehicle in pairs(workspace.Game.Vehicles:GetChildren()) do
+                                if not autoCollectTruckCash then break end
+                                if vehicle.Name == "Armored Truck" and vehicle:FindFirstChild("TruckCash") and vehicle:FindFirstChild("PrimaryPart") then
+                                    local distance = (rootPart.Position - vehicle.PrimaryPart.Position).magnitude
+                                    if distance <= 100 then
+                                        local originalCF = rootPart.CFrame
+                                        rootPart.CFrame = vehicle.PrimaryPart.CFrame
+                                        local truckCash = vehicle:FindFirstChild("TruckCash")
+                                        if truckCash and truckCash:FindFirstChild("Main") then
+                                            local prompt = truckCash.Main:FindFirstChild("Attachment")
+                                            if prompt then
+                                                prompt = prompt:FindFirstChild("ProximityPrompt")
+                                                if prompt then
+                                                    prompt.RequiresLineOfSight = false
+                                                    prompt.HoldDuration = 0
+                                                    fireproximityprompt(prompt)
+                                                    task.wait(0.5)
+                                                end
                                             end
                                         end
+                                        rootPart.CFrame = originalCF
                                     end
-                                    break
                                 end
                             end
+                            task.wait(1)
                         end
-                        local newSpins = LocalPlayer:GetAttribute("slotSpins") or 0
-                        if newSpins ~= currentSpins then
-                            spinChanged = true
-                            currentSpins = newSpins
-                        end
-                        task.wait(0.5)
-                    end
-
-                    if lockConnection then lockConnection:Disconnect() end
-                    busy = false
-
-                    local finalSpins = LocalPlayer:GetAttribute("slotSpins") or 0
-                    if not spinChanged and finalSpins == currentSpins then
-                        slotMachineNoWinCount = slotMachineNoWinCount + 1
-                    else
-                        slotMachineNoWinCount = 0
-                    end
-
-                    if slotMachineNoWinCount >= slotMachineMaxNoWin then
-                        slotMachineCooling = true
-                        slotMachineCooldownTimer = 0
-                        slotMachineNoWinCount = 0
-                    end
-
-                    if not autoSlotMachine then break end
-                    task.wait(0.5)
+                    end)
                 end
-                busy = false
+            end
+        })
+
+        AutoGroup:AddToggle('autoJewel', { Text = '自动珠宝店', Default = false, Callback = function(s) autozbd = s end })
+
+        AutoGroup:AddToggle('autoCollectScrap', {
+            Text = '自动捡废料',
+            Desc = '传送至废料位置跳跃后等待2秒拾取',
+            Default = false,
+            Callback = function(Value)
+                autoCollectScrap = Value
+                if Value then
+                    task.spawn(function()
+                        while autoCollectScrap do
+                            if FromATM or FromBank or autobx or autozbd or autoTreasure or autoblock or automoss or autoxybs or autoxywp or autoptbs or automoney or card then
+                                task.wait(1)
+                                continue
+                            end
+                            busy = true
+                            local success = fastCollectItems({"Electronics", "Weapon Parts"})
+                            if not success then
+                                task.wait(1)
+                            end
+                            busy = false
+                            task.wait(0.1)
+                        end
+                    end)
+                else
+                    busy = false
+                end
+            end
+        })
+
+        AutoGroup:AddToggle('autoSlotMachine', {
+            Text = '自动老虎机',
+            Desc = '固定6秒，连续2次未中奖则冷却30分钟',
+            Default = false,
+            Callback = function(s)
+                autoSlotMachine = s
+                if s then
+                    task.spawn(function()
+                        local slotMachineCFrame = CFrame.new(845.6194458007812, 13.917967796325684, -917.5487670898438) * CFrame.new(0, -8, 0)
+                        while autoSlotMachine do
+                            if FromATM or FromBank or autobx or autozbd or autoTreasure or autoblock or automoss or autoxybs or autoxywp or autoptbs or automoney or card then
+                                task.wait(1)
+                                continue
+                            end
+                            busy = true
+                            if slotMachineCooling then
+                                task.wait(1)
+                                slotMachineCooldownTimer = slotMachineCooldownTimer + 1
+                                if slotMachineCooldownTimer >= slotMachineCooldownDuration then
+                                    slotMachineCooling = false
+                                    slotMachineCooldownTimer = 0
+                                    slotMachineNoWinCount = 0
+                                end
+                                busy = false
+                                continue
+                            end
+
+                            local serverFurniture = workspace:FindFirstChild("ServerFurniture")
+                            local hasSlotMachine = false
+                            if serverFurniture then
+                                for _, furniture in pairs(serverFurniture:GetDescendants()) do
+                                    if furniture:GetAttribute("furnitureName") == "SlotMachine" then
+                                        hasSlotMachine = true
+                                        break
+                                    end
+                                end
+                            end
+
+                            if not hasSlotMachine then
+                                task.wait(1)
+                                busy = false
+                                continue
+                            end
+
+                            local character = LocalPlayer.Character
+                            if not character then
+                                busy = false
+                                task.wait(0.5)
+                                continue
+                            end
+                            local rootPart = character:FindFirstChild("HumanoidRootPart")
+                            if not rootPart then
+                                busy = false
+                                task.wait(0.5)
+                                continue
+                            end
+
+                            rootPart.CFrame = slotMachineCFrame
+
+                            local lockConnection = RunService.Heartbeat:Connect(function()
+                                if rootPart and rootPart.Parent then
+                                    rootPart.CFrame = slotMachineCFrame
+                                    rootPart.Velocity = Vector3.zero
+                                    rootPart.RotVelocity = Vector3.zero
+                                end
+                            end)
+
+                            local currentSpins = LocalPlayer:GetAttribute("slotSpins") or 0
+                            local startTime = tick()
+                            local spinChanged = false
+
+                            while autoSlotMachine and (tick() - startTime) < 6 do
+                                if serverFurniture then
+                                    for _, furniture in pairs(serverFurniture:GetDescendants()) do
+                                        if furniture:GetAttribute("furnitureName") == "SlotMachine" then
+                                            local prompt = furniture:FindFirstChild("Attachment", true)
+                                            if prompt then
+                                                prompt = prompt:FindFirstChild("ProximityPrompt")
+                                                if prompt then
+                                                    prompt.MaxActivationDistance = 40
+                                                    if (LocalPlayer:GetAttribute("slotSpins") or 0) > 0 then
+                                                        fireproximityprompt(prompt)
+                                                    end
+                                                end
+                                            end
+                                            break
+                                        end
+                                    end
+                                end
+                                local newSpins = LocalPlayer:GetAttribute("slotSpins") or 0
+                                if newSpins ~= currentSpins then
+                                    spinChanged = true
+                                    currentSpins = newSpins
+                                end
+                                task.wait(0.5)
+                            end
+
+                            if lockConnection then lockConnection:Disconnect() end
+                            busy = false
+
+                            local finalSpins = LocalPlayer:GetAttribute("slotSpins") or 0
+                            if not spinChanged and finalSpins == currentSpins then
+                                slotMachineNoWinCount = slotMachineNoWinCount + 1
+                            else
+                                slotMachineNoWinCount = 0
+                            end
+
+                            if slotMachineNoWinCount >= slotMachineMaxNoWin then
+                                slotMachineCooling = true
+                                slotMachineCooldownTimer = 0
+                                slotMachineNoWinCount = 0
+                            end
+
+                            if not autoSlotMachine then break end
+                            task.wait(0.5)
+                        end
+                        busy = false
+                    end)
+                else
+                    busy = false
+                end
+            end
+        })
+
+        AutoGroup:AddToggle('autoTreasure', { Text = '自动藏宝图', Default = false, Callback = function(s) autoTreasure = s end })
+        AutoGroup:AddToggle('autoSafe', { Text = '自动打开保险', Default = false, Callback = function(s) autobx = s end })
+        AutoGroup:AddToggle('unlockAura', {
+            Text = '开锁光环',
+            Default = false,
+            Callback = function(s)
+                autoUnlockEnabled = s
+                if s then
+                    startUnlockAura()
+                else
+                    stopUnlockAura()
+                end
+            end
+        })
+
+        AutoGroup:AddToggle('cashAura', { Text = '现金光环', Default = false, Callback = function(s)
+            cashAuraEnabled = s
+            if s then startCashAura() else stopCashAura() end
+        end })
+        AutoGroup:AddToggle('itemAura', { Text = '物品光环', Default = false, Callback = function(s)
+            itemAuraEnabled = s
+            if s then startItemAura() else stopItemAura() end
+        end })
+
+        function autoSellItems()
+            local sold = false
+            for _, v in pairs(items) do
+                if (v.type == "Holdable" and v.subtype == "gem" and v.sellPrice < 5000) or
+                   (v.subtype == "valuable") or
+                   (v.type == "Gun" and v.cost < 3999 and v.name ~= "Raygun") then
+                    FireServer("equip", v.guid)
+                    FireServer("sellItem", v.guid)
+                    sold = true
+                end
+            end
+            return sold
+        end
+
+        AutoGroup:AddToggle('autoSell', { Text = '自动售卖全部物品', Default = false, Callback = function(Value)
+            autoSellEnabled = Value
+            if autoSellTask then
+                task.cancel(autoSellTask)
+                autoSellTask = nil
+            end
+            if Value then
+                autoSellTask = task.spawn(function()
+                    while autoSellEnabled do
+                        pcall(autoSellItems)
+                        task.wait(0.1)
+                    end
+                end)
+            end
+        end })
+
+        AutoGroup:AddToggle('autoRemove', { Text = '自动移除垃圾', Default = false, Callback = function(s) remls = s end })
+        AutoGroup:AddToggle('autoConsume', { Text = '自动使用消耗品', Default = false, Callback = function(s) autouse = s end })
+
+        AutoGroup:AddToggle('autoCraft', {
+            Text = '自动制作萝莉',
+            Desc = '制作 Rollie 萝莉',
+            Default = false,
+            Callback = function(s)
+                autoCraftEnabled = s
+            end
+        })
+        AutoGroup:AddToggle('autoClaim', {
+            Text = '自动领取萝莉',
+            Desc = '领取已完成的 Rollie 萝莉',
+            Default = false,
+            Callback = function(s)
+                autoClaimEnabled = s
+            end
+        })
+        AutoGroup:AddToggle('autoStoreGems', {
+            Text = '自动存放珍贵宝石',
+            Desc = '将钻石、萝莉、暗物质宝石等存放到房屋珠宝柜',
+            Default = false,
+            Callback = function(s)
+                autoStoreGems = s
+            end
+        })
+
+        AutoGroup:AddToggle('autoReward', {
+            Text = '自动领取奖励',
+            Desc = '自动领取每日奖励和游玩时间奖励',
+            Default = false,
+            Callback = function(s)
+                if s then
+                    startAutoRewardLoop()
+                else
+                    stopAutoRewardLoop()
+                end
+            end
+        })
+    end
+
+    do
+        local FindGroup = Tabs.Ohio:AddRightGroupbox('寻找物品')
+        FindGroup:AddToggle('findRare', { Text = '自动寻找稀有物品', Default = false, Callback = function(s) autoxywp = s end })
+        FindGroup:AddToggle('findBalloon', { Text = '自动寻找气球', Default = false, Callback = function(s) FromBalloon = s end })
+        FindGroup:AddToggle('findPrinter', { Text = '自动寻找印钞机', Default = false, Callback = function(s) automoney = s end })
+        FindGroup:AddToggle('findGems', { Text = '自动寻找普通宝石', Default = false, Callback = function(s) autoptbs = s end })
+        FindGroup:AddToggle('findRareGems', { Text = '自动寻找稀有宝石', Default = false, Callback = function(s) autoxybs = s end })
+        FindGroup:AddToggle('findPresents', { Text = '自动寻找礼物', Default = false, Callback = function(s) automoss = s end })
+        FindGroup:AddToggle('findBlocks', { Text = '自动寻找幸运方块', Default = false, Callback = function(s) autoblock = s end })
+        FindGroup:AddToggle('findCard', { Text = '自动寻找红卡', Default = false, Callback = function(s) card = s end })
+    end
+
+    do
+        local CounterGroup = Tabs.Ohio:AddLeftGroupbox('反制')
+        CounterGroup:AddButton('重新进入服务器', function() game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer) end)
+        local toastMsg, toastTime = "", 5
+        CounterGroup:AddInput('toastMsg', { Text = '弹窗内容', Default = '', Callback = function(v) toastMsg = v end })
+        CounterGroup:AddInput('toastTime', { Text = '弹窗时长(秒)', Default = '5', Callback = function(v) toastTime = tonumber(v) or 5 end })
+        CounterGroup:AddButton('发送弹窗', function() loadModule("makeToast")(toastMsg, "rainbow", toastTime) end)
+        CounterGroup:AddButton('通话禁音', function() FireServer("setAirplaneMode", true); LocalPlayer:SetAttribute('isAirplaneMode', true) end)
+        CounterGroup:AddButton('不允许战斗中', function()
+            local combatIndicator = require(ReplicatedStorage.devv.client.Helpers.ui.combatIndicator)
+            hookfunction(combatIndicator.isInCombat, function() return false end)
+            hookfunction(combatIndicator.enterCombat, function() end)
+        end)
+        CounterGroup:AddButton('不允许被抓取', function()
+            local GrabHandler = require(ReplicatedStorage.devv.client.Handlers.GrabHandler)
+            local oldCheck = GrabHandler.CheckValid
+            GrabHandler.CheckValid = function(self, p29, p30) if p29 == LocalPlayer then return false end; return oldCheck(self, p29, p30) end
+            local oldGrab = GrabHandler.Grab
+            GrabHandler.Grab = function(self, p55) if p55 == LocalPlayer then return end; return oldGrab(self, p55) end
+        end)
+        CounterGroup:AddButton('清除树叶', function()
+            for _, v in workspace:GetDescendants() do if v.Name == "Leaves" and v:IsA("MeshPart") then v:Destroy() end end
+        end)
+        CounterGroup:AddButton('反坐下', function()
+            local function antiSit(char)
+                local hum = char:WaitForChild("Humanoid")
+                hum:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
+                hum:GetPropertyChangedSignal("Sit"):Connect(function() if hum.Sit then hum.Sit = false end end)
+                hum.Sit = false
+            end
+            if LocalPlayer.Character then antiSit(LocalPlayer.Character) end
+            LocalPlayer.CharacterAdded:Connect(antiSit)
+        end)
+        CounterGroup:AddToggle('antiDoll', { Text = '反布娃娃', Default = false, Callback = function(s) AntiDoll = s end })
+        CounterGroup:AddToggle('antiAdmin', { Text = '反管理', Default = false, Callback = function(s) AntiAdmin = s end })
+    end
+
+    do
+        local BypassGroup = Tabs.Ohio:AddRightGroupbox('绕过')
+        BypassGroup:AddInput('fakeMoney', { Text = '伪装金钱数量', Default = '', Callback = function(v) fakemoney = tonumber(v) or 0 end })
+        BypassGroup:AddToggle('fakeMoneyToggle', { Text = '开启伪装', Default = false, Callback = function(s)
+            openfake = s
+            if s then
+                if fakeConnection then fakeConnection:Disconnect() end
+                fakeConnection = RunService.Heartbeat:Connect(function()
+                    local moneyDisplay = loadModule("moneyDisplay")
+                    loadModule("v3sound")
+                    moneyDisplay.current = fakemoney
+                    moneyDisplay.tweenTo = fakemoney
+                    local equipped = loadModule("v3item").inventory.getEquipped()
+                    if equipped and equipped.name == "Wallet" then
+                        equipped.controller:updateMoney(fakemoney)
+                    end
+                end)
+            else
+                if fakeConnection then fakeConnection:Disconnect(); fakeConnection = nil end
+            end
+        end })
+        BypassGroup:AddSlider('inventorySlots', { Text = '物品栏数量', Min = 6, Max = 12, Default = 9, Callback = function(v) loadModule("v3item").inventory.numSlots = v end })
+        BypassGroup:AddButton('解锁移动经销商', function()
+            local Signal = require(ReplicatedStorage.devv.client.Helpers.remotes.Signal)
+            local oldInvoke = Signal.InvokeServer
+            Signal.InvokeServer = function(self, cmd, ...)
+                if cmd == "attemptPurchase" or cmd == "attemptPurchaseAmmo" then
+                    local itemName, isDealer = ...
+                    return oldInvoke(self, cmd, itemName, false, select(3,...))
+                end
+                return oldInvoke(self, cmd, ...)
+            end
+            LocalPlayer:SetAttribute("mobileDealer",true)
+            local mobileDealer = require(ReplicatedStorage.devv.shared.Indicies.mobileDealer)
+            for _, items in pairs(mobileDealer) do for _, item in ipairs(items) do item.stock = 12e12 end end
+            table.insert(mobileDealer.Gun, {itemName="Acid Gun",stock=12e12})
+        end)
+        BypassGroup:AddButton('解锁全皮肤', function()
+            local skinsModule = require(ReplicatedStorage.devv.client.Helpers.ui.screens.CaseMenu.Skins)
+            local state = loadModule("state")
+            hookfunction(skinsModule.AttemptEquip, function(self, itemName, skinName)
+                local skinToEquip = skinName
+                if self:IsSkinEquipped(itemName, skinName) then skinToEquip = nil end
+                state.data.equippedSkins[itemName] = skinToEquip
+                loadModule("v3item").inventory.unequipAll()
+                loadModule("v3item").inventory.skinUpdate(itemName, skinToEquip)
+                self:_setEquipped(itemName, skinToEquip)
+                return true
             end)
-        else
-            busy = false
-        end
+            local skins = loadModule("skins")
+            for skinName in pairs(skins.skinData) do
+                for _, itemName in pairs(skins.compatabilities.Generic) do
+                    state.data.ownedSkins[itemName] = state.data.ownedSkins[itemName] or {}
+                    state.data.ownedSkins[itemName][skinName] = 1
+                end
+            end
+        end)
+        BypassGroup:AddButton('解锁高级表情', function()
+            for _, v in LocalPlayer.PlayerGui.Emotes.Frame.ScrollingFrame:GetDescendants() do
+                if v.Name == "Locked" then v.Visible = false end
+            end
+        end)
+        BypassGroup:AddButton('绕过火&酸伤害', function()
+            local fire = ReplicatedStorage.devv.remoteStorage:FindFirstChild("fireHit")
+            local acid = ReplicatedStorage.devv.remoteStorage:FindFirstChild("acidHit")
+            if fire then fire:Destroy() end
+            if acid then acid:Destroy() end
+        end)
     end
-})
 
-AutoGroup:AddToggle('autoTreasure', { Text = '自动藏宝图', Default = false, Callback = function(s) autoTreasure = s end })
-AutoGroup:AddToggle('autoSafe', { Text = '自动打开保险', Default = false, Callback = function(s) autobx = s end })
-AutoGroup:AddToggle('unlockAura', {
-    Text = '开锁光环',
-    Default = false,
-    Callback = function(s)
-        autoUnlockEnabled = s
-        if s then
-            startUnlockAura()
-        else
-            stopUnlockAura()
-        end
+    do
+        local WeaponGroup = Tabs.Ohio:AddLeftGroupbox('武器')
+        WeaponGroup:AddToggle('silentAim', { Text = '静默自瞄', Default = false, Callback = function(s) silentaim = s end })
+        WeaponGroup:AddButton('全枪无后座', function()
+            for _, v in game:GetDescendants() do if v:IsA("ParticleEmitter") then v:Destroy() end end
+            game.DescendantAdded:Connect(function(d) if d:IsA("ParticleEmitter") then d:Destroy() end end)
+            for _, v in pairs(items) do if v.type == "Gun" then v.recoilAdd=0; v.maxRecoil=0; v.recoilDiminishFactor=0; v.recoilFastDiminishFactor=0 end end
+            for _, gun in pairs(ReplicatedStorage.devv.shared.Indicies.v3items.bin.Gun:GetChildren()) do
+                if gun:IsA("ModuleScript") then
+                    local t = require(gun); t.recoilAdd=0; t.maxRecoil=0; t.recoilDiminishFactor=0; t.recoilFastDiminishFactor=0
+                end
+            end
+        end)
+        WeaponGroup:AddButton('全枪据点', function()
+            for _, v in pairs(items) do if v.type == "Gun" then v.baseSpread=0; v.baseAimSpread=0; v.spread=0; v.aimSpread=0 end end
+            for _, gun in pairs(ReplicatedStorage.devv.shared.Indicies.v3items.bin.Gun:GetChildren()) do
+                if gun:IsA("ModuleScript") then local t = require(gun); t.baseSpread=0; t.baseAimSpread=0 end
+            end
+        end)
+        WeaponGroup:AddButton('全枪射速', function()
+            for _, v in pairs(items) do if v.type == "Gun" then v.fireDebounce=0 end end
+            for _, gun in pairs(ReplicatedStorage.devv.shared.Indicies.v3items.bin.Gun:GetChildren()) do
+                if gun:IsA("ModuleScript") then local t = require(gun); t.fireDebounce=0 end
+            end
+        end)
+        WeaponGroup:AddButton('全枪瞬击', function()
+            for _, v in pairs(items) do if v.type == "Gun" then v.speedMax=9999; v.speedDropoff=0; v.projectileLifetime=9999 end end
+            for _, gun in pairs(ReplicatedStorage.devv.shared.Indicies.v3items.bin.Gun:GetChildren()) do
+                if gun:IsA("ModuleScript") then local t = require(gun); t.speedMax=9999; t.speedDropoff=0; t.projectileLifetime=9999 end
+            end
+        end)
+        WeaponGroup:AddButton('快速换弹', function()
+            for _, v in pairs(items) do if v.type == "Gun" then v.reloadTime=0 end end
+            for _, gun in pairs(ReplicatedStorage.devv.shared.Indicies.v3items.bin.Gun:GetChildren()) do
+                if gun:IsA("ModuleScript") then local t = require(gun); t.reloadTime=0 end
+            end
+        end)
     end
-})
 
-AutoGroup:AddToggle('cashAura', { Text = '现金光环', Default = false, Callback = function(s)
-    cashAuraEnabled = s
-    if s then startCashAura() else stopCashAura() end
-end })
-AutoGroup:AddToggle('itemAura', { Text = '物品光环', Default = false, Callback = function(s)
-    itemAuraEnabled = s
-    if s then startItemAura() else stopItemAura() end
-end })
-
-function autoSellItems()
-    local sold = false
-    for _, v in pairs(items) do
-        if (v.type == "Holdable" and v.subtype == "gem" and v.sellPrice < 5000) or
-           (v.subtype == "valuable") or
-           (v.type == "Gun" and v.cost < 3999 and v.name ~= "Raygun") then
-            FireServer("equip", v.guid)
-            FireServer("sellItem", v.guid)
-            sold = true
-        end
+    do
+        local MenuGroup = Tabs["UI Settings"]:AddLeftGroupbox("Debug")
+        MenuGroup:AddToggle("KeybindMenuOpen", {
+            Default = Library.KeybindFrame.Visible,
+            Text = "shortcut menu",
+            Callback = function(value) Library.KeybindFrame.Visible = value end,
+        })
+        MenuGroup:AddToggle("ShowCustomCursor", {
+            Text = "custom cursors",
+            Default = true,
+            Callback = function(Value) Library.ShowCustomCursor = Value end,
+        })
+        MenuGroup:AddDropdown("NotificationSide", {
+            Values = { "Left", "Right" },
+            Default = "Right",
+            Text = "informer location",
+            Callback = function(Value) Library:SetNotifySide(Value) end,
+        })
+        MenuGroup:AddDropdown("DPIDropdown", {
+            Values = { "25%", "50%", "75%", "100%", "125%", "150%", "175%", "200%" },
+            Default = "100%",
+            Text = "UI Size",
+            Callback = function(Value)
+                Value = Value:gsub("%%", "")
+                local DPI = tonumber(Value)
+                Library:SetDPIScale(DPI)
+            end,
+        })
+        MenuGroup:AddDivider()
+        MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", { Default = "RightShift", NoUI = true, Text = "Menu keybind" })
+        MenuGroup:AddButton("Destroy UI", function() Library:Unload() end)
     end
-    return sold
+
+    ThemeManager:SetLibrary(Library)
+    SaveManager:SetLibrary(Library)
+    SaveManager:IgnoreThemeSettings()
+    SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
+    ThemeManager:SetFolder("MyScriptHub")
+    SaveManager:SetFolder("MyScriptHub/specific-game")
+    SaveManager:SetSubFolder("specific-place")
+    SaveManager:BuildConfigSection(Tabs["UI Settings"])
+    ThemeManager:ApplyToTab(Tabs["UI Settings"])
+    SaveManager:LoadAutoloadConfig()
 end
 
-AutoGroup:AddToggle('autoSell', { Text = '自动售卖全部物品', Default = false, Callback = function(Value)
-    autoSellEnabled = Value
-    if autoSellTask then
-        task.cancel(autoSellTask)
-        autoSellTask = nil
-    end
-    if Value then
-        autoSellTask = task.spawn(function()
-            while autoSellEnabled do
-                pcall(autoSellItems)
-                task.wait(0.1)
-            end
-        end)
-    end
-end })
-
-AutoGroup:AddToggle('autoRemove', { Text = '自动移除垃圾', Default = false, Callback = function(s) remls = s end })
-AutoGroup:AddToggle('autoConsume', { Text = '自动使用消耗品', Default = false, Callback = function(s) autouse = s end })
-AutoGroup:AddToggle('idleTeleport', { Text = 'AFK位置', Default = true, Callback = function(s)
-    idleTeleportEnabled = s
-    updateIdleConnection()
-end })
-
-AutoGroup:AddToggle('autoCraft', {
-    Text = '自动制作萝莉',
-    Desc = '制作 Rollie 萝莉',
-    Default = false,
-    Callback = function(s)
-        autoCraftEnabled = s
-    end
-})
-AutoGroup:AddToggle('autoClaim', {
-    Text = '自动领取萝莉',
-    Desc = '领取已完成的 Rollie 萝莉',
-    Default = false,
-    Callback = function(s)
-        autoClaimEnabled = s
-    end
-})
-AutoGroup:AddToggle('autoStoreGems', {
-    Text = '自动存放珍贵宝石',
-    Desc = '将钻石、萝莉、暗物质宝石等存放到房屋珠宝柜',
-    Default = false,
-    Callback = function(s)
-        autoStoreGems = s
-    end
-})
-
-AutoGroup:AddToggle('autoReward', {
-    Text = '自动领取奖励',
-    Desc = '自动领取每日奖励和游玩时间奖励',
-    Default = false,
-    Callback = function(s)
-        if s then
-            startAutoRewardLoop()
-        else
-            stopAutoRewardLoop()
-        end
-    end
-})
-
-FindGroup = Tabs.Ohio:AddRightGroupbox('寻找物品')
-FindGroup:AddToggle('findRare', { Text = '自动寻找稀有物品', Default = false, Callback = function(s) autoxywp = s end })
-FindGroup:AddToggle('findBalloon', { Text = '自动寻找气球', Default = false, Callback = function(s) FromBalloon = s end })
-FindGroup:AddToggle('findPrinter', { Text = '自动寻找印钞机', Default = false, Callback = function(s) automoney = s end })
-FindGroup:AddToggle('findGems', { Text = '自动寻找普通宝石', Default = false, Callback = function(s) autoptbs = s end })
-FindGroup:AddToggle('findRareGems', { Text = '自动寻找稀有宝石', Default = false, Callback = function(s) autoxybs = s end })
-FindGroup:AddToggle('findPresents', { Text = '自动寻找礼物', Default = false, Callback = function(s) automoss = s end })
-FindGroup:AddToggle('findBlocks', { Text = '自动寻找幸运方块', Default = false, Callback = function(s) autoblock = s end })
-FindGroup:AddToggle('findCard', { Text = '自动寻找红卡', Default = false, Callback = function(s) card = s end })
-
-CounterGroup = Tabs.Ohio:AddLeftGroupbox('反制')
-CounterGroup:AddButton('重新进入服务器', function() game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer) end)
-toastMsg, toastTime = "", 5
-CounterGroup:AddInput('toastMsg', { Text = '弹窗内容', Default = '', Callback = function(v) toastMsg = v end })
-CounterGroup:AddInput('toastTime', { Text = '弹窗时长(秒)', Default = '5', Callback = function(v) toastTime = tonumber(v) or 5 end })
-CounterGroup:AddButton('发送弹窗', function() loadModule("makeToast")(toastMsg, "rainbow", toastTime) end)
-CounterGroup:AddButton('通话禁音', function() FireServer("setAirplaneMode", true); LocalPlayer:SetAttribute('isAirplaneMode', true) end)
-CounterGroup:AddButton('不允许战斗中', function()
-    local combatIndicator = require(ReplicatedStorage.devv.client.Helpers.ui.combatIndicator)
-    hookfunction(combatIndicator.isInCombat, function() return false end)
-    hookfunction(combatIndicator.enterCombat, function() end)
-end)
-CounterGroup:AddButton('不允许被抓取', function()
-    local GrabHandler = require(ReplicatedStorage.devv.client.Handlers.GrabHandler)
-    local oldCheck = GrabHandler.CheckValid
-    GrabHandler.CheckValid = function(self, p29, p30) if p29 == LocalPlayer then return false end; return oldCheck(self, p29, p30) end
-    local oldGrab = GrabHandler.Grab
-    GrabHandler.Grab = function(self, p55) if p55 == LocalPlayer then return end; return oldGrab(self, p55) end
-end)
-CounterGroup:AddButton('清除树叶', function()
-    for _, v in workspace:GetDescendants() do if v.Name == "Leaves" and v:IsA("MeshPart") then v:Destroy() end end
-end)
-CounterGroup:AddButton('反坐下', function()
-    local function antiSit(char)
-        local hum = char:WaitForChild("Humanoid")
-        hum:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
-        hum:GetPropertyChangedSignal("Sit"):Connect(function() if hum.Sit then hum.Sit = false end end)
-        hum.Sit = false
-    end
-    if LocalPlayer.Character then antiSit(LocalPlayer.Character) end
-    LocalPlayer.CharacterAdded:Connect(antiSit)
-end)
-CounterGroup:AddToggle('antiDoll', { Text = '反布娃娃', Default = false, Callback = function(s) AntiDoll = s end })
-CounterGroup:AddToggle('antiAdmin', { Text = '反管理', Default = false, Callback = function(s) AntiAdmin = s end })
-
-BypassGroup = Tabs.Ohio:AddRightGroupbox('绕过')
-BypassGroup:AddInput('fakeMoney', { Text = '伪装金钱数量', Default = '', Callback = function(v) fakemoney = tonumber(v) or 0 end })
-BypassGroup:AddToggle('fakeMoneyToggle', { Text = '开启伪装', Default = false, Callback = function(s)
-    openfake = s
-    if s then
-        if fakeConnection then fakeConnection:Disconnect() end
-        fakeConnection = RunService.Heartbeat:Connect(function()
-            local moneyDisplay = loadModule("moneyDisplay")
-            loadModule("v3sound")
-            moneyDisplay.current = fakemoney
-            moneyDisplay.tweenTo = fakemoney
-            local equipped = loadModule("v3item").inventory.getEquipped()
-            if equipped and equipped.name == "Wallet" then
-                equipped.controller:updateMoney(fakemoney)
-            end
-        end)
-    else
-        if fakeConnection then fakeConnection:Disconnect(); fakeConnection = nil end
-    end
-end })
-BypassGroup:AddSlider('inventorySlots', { Text = '物品栏数量', Min = 6, Max = 12, Default = 9, Callback = function(v) loadModule("v3item").inventory.numSlots = v end })
-BypassGroup:AddButton('解锁移动经销商', function()
-    local Signal = require(ReplicatedStorage.devv.client.Helpers.remotes.Signal)
-    local oldInvoke = Signal.InvokeServer
-    Signal.InvokeServer = function(self, cmd, ...)
-        if cmd == "attemptPurchase" or cmd == "attemptPurchaseAmmo" then
-            local itemName, isDealer = ...
-            return oldInvoke(self, cmd, itemName, false, select(3,...))
-        end
-        return oldInvoke(self, cmd, ...)
-    end
-    LocalPlayer:SetAttribute("mobileDealer",true)
-    local mobileDealer = require(ReplicatedStorage.devv.shared.Indicies.mobileDealer)
-    for _, items in pairs(mobileDealer) do for _, item in ipairs(items) do item.stock = 12e12 end end
-    table.insert(mobileDealer.Gun, {itemName="Acid Gun",stock=12e12})
-end)
-BypassGroup:AddButton('解锁全皮肤', function()
-    local skinsModule = require(ReplicatedStorage.devv.client.Helpers.ui.screens.CaseMenu.Skins)
-    local state = loadModule("state")
-    hookfunction(skinsModule.AttemptEquip, function(self, itemName, skinName)
-        local skinToEquip = skinName
-        if self:IsSkinEquipped(itemName, skinName) then skinToEquip = nil end
-        state.data.equippedSkins[itemName] = skinToEquip
-        loadModule("v3item").inventory.unequipAll()
-        loadModule("v3item").inventory.skinUpdate(itemName, skinToEquip)
-        self:_setEquipped(itemName, skinToEquip)
-        return true
-    end)
-    local skins = loadModule("skins")
-    for skinName in pairs(skins.skinData) do
-        for _, itemName in pairs(skins.compatabilities.Generic) do
-            state.data.ownedSkins[itemName] = state.data.ownedSkins[itemName] or {}
-            state.data.ownedSkins[itemName][skinName] = 1
-        end
-    end
-end)
-BypassGroup:AddButton('解锁高级表情', function()
-    for _, v in LocalPlayer.PlayerGui.Emotes.Frame.ScrollingFrame:GetDescendants() do
-        if v.Name == "Locked" then v.Visible = false end
-    end
-end)
-BypassGroup:AddButton('绕过火&酸伤害', function()
-    local fire = ReplicatedStorage.devv.remoteStorage:FindFirstChild("fireHit")
-    local acid = ReplicatedStorage.devv.remoteStorage:FindFirstChild("acidHit")
-    if fire then fire:Destroy() end
-    if acid then acid:Destroy() end
-end)
-
-WeaponGroup = Tabs.Ohio:AddLeftGroupbox('武器')
-WeaponGroup:AddToggle('silentAim', { Text = '静默自瞄', Default = false, Callback = function(s) silentaim = s end })
-WeaponGroup:AddButton('全枪无后座', function()
-    for _, v in game:GetDescendants() do if v:IsA("ParticleEmitter") then v:Destroy() end end
-    game.DescendantAdded:Connect(function(d) if d:IsA("ParticleEmitter") then d:Destroy() end end)
-    for _, v in pairs(items) do if v.type == "Gun" then v.recoilAdd=0; v.maxRecoil=0; v.recoilDiminishFactor=0; v.recoilFastDiminishFactor=0 end end
-    for _, gun in pairs(ReplicatedStorage.devv.shared.Indicies.v3items.bin.Gun:GetChildren()) do
-        if gun:IsA("ModuleScript") then
-            local t = require(gun); t.recoilAdd=0; t.maxRecoil=0; t.recoilDiminishFactor=0; t.recoilFastDiminishFactor=0
-        end
-    end
-end)
-WeaponGroup:AddButton('全枪据点', function()
-    for _, v in pairs(items) do if v.type == "Gun" then v.baseSpread=0; v.baseAimSpread=0; v.spread=0; v.aimSpread=0 end end
-    for _, gun in pairs(ReplicatedStorage.devv.shared.Indicies.v3items.bin.Gun:GetChildren()) do
-        if gun:IsA("ModuleScript") then local t = require(gun); t.baseSpread=0; t.baseAimSpread=0 end
-    end
-end)
-WeaponGroup:AddButton('全枪射速', function()
-    for _, v in pairs(items) do if v.type == "Gun" then v.fireDebounce=0 end end
-    for _, gun in pairs(ReplicatedStorage.devv.shared.Indicies.v3items.bin.Gun:GetChildren()) do
-        if gun:IsA("ModuleScript") then local t = require(gun); t.fireDebounce=0 end
-    end
-end)
-WeaponGroup:AddButton('全枪瞬击', function()
-    for _, v in pairs(items) do if v.type == "Gun" then v.speedMax=9999; v.speedDropoff=0; v.projectileLifetime=9999 end end
-    for _, gun in pairs(ReplicatedStorage.devv.shared.Indicies.v3items.bin.Gun:GetChildren()) do
-        if gun:IsA("ModuleScript") then local t = require(gun); t.speedMax=9999; t.speedDropoff=0; t.projectileLifetime=9999 end
-    end
-end)
-WeaponGroup:AddButton('快速换弹', function()
-    for _, v in pairs(items) do if v.type == "Gun" then v.reloadTime=0 end end
-    for _, gun in pairs(ReplicatedStorage.devv.shared.Indicies.v3items.bin.Gun:GetChildren()) do
-        if gun:IsA("ModuleScript") then local t = require(gun); t.reloadTime=0 end
-    end
-end)
-
-MenuGroup = Tabs["UI Settings"]:AddLeftGroupbox("Debug")
-MenuGroup:AddToggle("KeybindMenuOpen", {
-    Default = Library.KeybindFrame.Visible,
-    Text = "shortcut menu",
-    Callback = function(value) Library.KeybindFrame.Visible = value end,
-})
-MenuGroup:AddToggle("ShowCustomCursor", {
-    Text = "custom cursors",
-    Default = true,
-    Callback = function(Value) Library.ShowCustomCursor = Value end,
-})
-MenuGroup:AddDropdown("NotificationSide", {
-    Values = { "Left", "Right" },
-    Default = "Right",
-    Text = "informer location",
-    Callback = function(Value) Library:SetNotifySide(Value) end,
-})
-MenuGroup:AddDropdown("DPIDropdown", {
-    Values = { "25%", "50%", "75%", "100%", "125%", "150%", "175%", "200%" },
-    Default = "100%",
-    Text = "UI Size",
-    Callback = function(Value)
-        Value = Value:gsub("%%", "")
-        local DPI = tonumber(Value)
-        Library:SetDPIScale(DPI)
-    end,
-})
-MenuGroup:AddDivider()
-MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", { Default = "RightShift", NoUI = true, Text = "Menu keybind" })
-MenuGroup:AddButton("Destroy UI", function() Library:Unload() end)
-
-ThemeManager:SetLibrary(Library)
-SaveManager:SetLibrary(Library)
-SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
-ThemeManager:SetFolder("MyScriptHub")
-SaveManager:SetFolder("MyScriptHub/specific-game")
-SaveManager:SetSubFolder("specific-place")
-SaveManager:BuildConfigSection(Tabs["UI Settings"])
-ThemeManager:ApplyToTab(Tabs["UI Settings"])
-SaveManager:LoadAutoloadConfig()
-
+setupUI()
 updateIdleConnection()
 
 function combatTick()
