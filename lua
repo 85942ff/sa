@@ -167,9 +167,8 @@ local cashAuraConnection = nil
 local itemAuraConnection = nil
 
 local autoSellEnabled = false
-local autoSellInterval = 1
-local lastBombardmentTime = 0
-local autoSellConnection
+local autoSellTask = nil
+local autoSellFailCount = 0
 
 local autoBuyGunAmmo = false
 local autoBuyFlameAmmo = false
@@ -1075,7 +1074,8 @@ local function runSafePhase()
                     if prompt and prompt.Enabled then
                         local root = getRoot(LocalPlayer.Character)
                         if root then
-                            local lockCF = CFrame.new(chest.PrimaryPart.Position - Vector3.new(0,2,0)) * CFrame.Angles(math.rad(90), 0, 0)
+                            -- 修改：将地下2米改为3米
+                            local lockCF = CFrame.new(chest.PrimaryPart.Position - Vector3.new(0,3,0)) * CFrame.Angles(math.rad(90), 0, 0)
                             root.CFrame = lockCF
 
                             local lockConn = RunService.Heartbeat:Connect(function()
@@ -1717,6 +1717,7 @@ AutoGroup:AddToggle('autoCollectTruckCash', {
 
 AutoGroup:AddToggle('autoJewel', { Text = '自动珠宝店', Default = false, Callback = function(s) autozbd = s end })
 
+-- 修改：自动捡废料，添加 busy 控制，结束后传送回 idle
 AutoGroup:AddToggle('autoCollectScrap', {
     Text = '自动捡废料',
     Desc = '传送至废料位置跳跃后等待2秒拾取',
@@ -1726,17 +1727,30 @@ AutoGroup:AddToggle('autoCollectScrap', {
         if Value then
             task.spawn(function()
                 while autoCollectScrap do
+                    busy = true  -- 阻止 AFK 传送
                     local success = fastCollectItems({"Electronics", "Weapon Parts"})
                     if not success then
                         task.wait(1)
                     end
+                    busy = false
+                    -- 传送回 AFK 位置
+                    local root = getRoot(LocalPlayer.Character)
+                    if root and root.Parent then
+                        root.CFrame = idleLocation
+                        root.Velocity = Vector3.zero
+                        root.RotVelocity = Vector3.zero
+                    end
                     task.wait(0.1)
                 end
             end)
+        else
+            -- 关闭时确保释放 busy
+            busy = false
         end
     end
 })
 
+-- 修改：自动老虎机，添加 busy 控制，结束后传送回 idle
 AutoGroup:AddToggle('autoSlotMachine', {
     Text = '自动老虎机',
     Desc = '固定6秒，连续2次未中奖则冷却30分钟',
@@ -1747,6 +1761,7 @@ AutoGroup:AddToggle('autoSlotMachine', {
             task.spawn(function()
                 local slotMachineCFrame = CFrame.new(845.6194458007812, 13.917967796325684, -917.5487670898438) * CFrame.new(0, -8, 0)
                 while autoSlotMachine do
+                    busy = true  -- 阻止 AFK 传送
                     -- 如果处于冷却状态，等待冷却时间结束
                     if slotMachineCooling then
                         task.wait(1)
@@ -1755,6 +1770,14 @@ AutoGroup:AddToggle('autoSlotMachine', {
                             slotMachineCooling = false
                             slotMachineCooldownTimer = 0
                             slotMachineNoWinCount = 0
+                        end
+                        busy = false
+                        -- 冷却期间也传送回AFK
+                        local root = getRoot(LocalPlayer.Character)
+                        if root and root.Parent then
+                            root.CFrame = idleLocation
+                            root.Velocity = Vector3.zero
+                            root.RotVelocity = Vector3.zero
                         end
                         continue
                     end
@@ -1772,15 +1795,29 @@ AutoGroup:AddToggle('autoSlotMachine', {
 
                     if not hasSlotMachine then
                         task.wait(1)
+                        busy = false
+                        local root = getRoot(LocalPlayer.Character)
+                        if root and root.Parent then
+                            root.CFrame = idleLocation
+                            root.Velocity = Vector3.zero
+                            root.RotVelocity = Vector3.zero
+                        end
                         continue
                     end
 
                     local character = LocalPlayer.Character
-                    if not character then task.wait(0.5) break end
+                    if not character then
+                        busy = false
+                        task.wait(0.5)
+                        continue
+                    end
                     local rootPart = character:FindFirstChild("HumanoidRootPart")
-                    if not rootPart then task.wait(0.5) break end
+                    if not rootPart then
+                        busy = false
+                        task.wait(0.5)
+                        continue
+                    end
 
-                    local originalCF = rootPart.CFrame
                     rootPart.CFrame = slotMachineCFrame
 
                     local lockConnection = RunService.Heartbeat:Connect(function()
@@ -1824,7 +1861,13 @@ AutoGroup:AddToggle('autoSlotMachine', {
                     end
 
                     if lockConnection then lockConnection:Disconnect() end
-                    rootPart.CFrame = originalCF
+                    busy = false
+                    -- 传送回 AFK 位置
+                    if rootPart and rootPart.Parent then
+                        rootPart.CFrame = idleLocation
+                        rootPart.Velocity = Vector3.zero
+                        rootPart.RotVelocity = Vector3.zero
+                    end
 
                     -- 检查本次固定期间是否中奖（spins减少）
                     local finalSpins = LocalPlayer:GetAttribute("slotSpins") or 0
@@ -1844,7 +1887,10 @@ AutoGroup:AddToggle('autoSlotMachine', {
                     if not autoSlotMachine then break end
                     task.wait(0.5)
                 end
+                busy = false  -- 确保退出时释放
             end)
+        else
+            busy = false
         end
     end
 })
@@ -1873,30 +1919,54 @@ AutoGroup:AddToggle('itemAura', { Text = '物品光环', Default = false, Callba
     if s then startItemAura() else stopItemAura() end
 end })
 
+-- 自动出售函数（返回是否出售了至少一件）
 function autoSellItems()
+    local sold = false
     for _, v in pairs(items) do
         if (v.type == "Holdable" and v.subtype == "gem" and v.sellPrice < 5000) or
            (v.subtype == "valuable") or
            (v.type == "Gun" and v.cost < 3999 and v.name ~= "Raygun") then
             FireServer("equip", v.guid)
             FireServer("sellItem", v.guid)
+            sold = true
         end
     end
+    return sold
 end
 
 AutoGroup:AddToggle('autoSell', { Text = '自动售卖全部物品', Default = false, Callback = function(Value)
     autoSellEnabled = Value
-    if autoSellConnection then autoSellConnection:Disconnect(); autoSellConnection = nil end
+    if autoSellTask then
+        task.cancel(autoSellTask)
+        autoSellTask = nil
+    end
     if Value then
-        autoSellConnection = RunService.Heartbeat:Connect(function()
-            if tick() - lastBombardmentTime >= autoSellInterval then
-                pcall(autoSellItems)
-                lastBombardmentTime = tick()
+        autoSellTask = task.spawn(function()
+            while autoSellEnabled do
+                local success, sold = pcall(autoSellItems)
+                if success and sold then
+                    autoSellFailCount = 0
+                    -- 出售成功，立即继续循环
+                else
+                    autoSellFailCount = autoSellFailCount + 1
+                    local waitTime
+                    if autoSellFailCount == 1 then
+                        waitTime = 300  -- 5分钟
+                    elseif autoSellFailCount == 2 then
+                        waitTime = 600  -- 10分钟
+                    elseif autoSellFailCount == 3 then
+                        waitTime = 1800 -- 30分钟
+                    else
+                        waitTime = 600  -- 10分钟
+                    end
+                    task.wait(waitTime)
+                end
+                task.wait(0.1)  -- 避免空转
             end
         end)
-        pcall(autoSellItems)
     end
 end })
+
 AutoGroup:AddToggle('autoRemove', { Text = '自动移除垃圾', Default = false, Callback = function(s) remls = s end })
 AutoGroup:AddToggle('autoConsume', { Text = '自动使用消耗品', Default = false, Callback = function(s) autouse = s end })
 AutoGroup:AddToggle('idleTeleport', { Text = 'AFK位置', Default = true, Callback = function(s)
