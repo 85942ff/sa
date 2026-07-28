@@ -168,7 +168,6 @@ local itemAuraConnection = nil
 
 local autoSellEnabled = false
 local autoSellTask = nil
-local autoSellFailCount = 0
 
 local autoBuyGunAmmo = false
 local autoBuyFlameAmmo = false
@@ -214,7 +213,7 @@ local ITEM_AURA_INTERVAL = 0.1
 -- 老虎机冷却检测变量
 local slotMachineCooling = false
 local slotMachineCooldownTimer = 0
-local slotMachineCooldownDuration = 1800 -- 30分钟（秒）
+local slotMachineCooldownDuration = 1800
 local slotMachineNoWinCount = 0
 local slotMachineMaxNoWin = 2
 local slotMachineLastSpins = 0
@@ -1715,7 +1714,7 @@ AutoGroup:AddToggle('autoCollectTruckCash', {
 
 AutoGroup:AddToggle('autoJewel', { Text = '自动珠宝店', Default = false, Callback = function(s) autozbd = s end })
 
--- 自动捡废料：执行期间阻止AFK传送，结束后不强制传送
+-- 自动捡废料：只在空闲时工作，不强制传送
 AutoGroup:AddToggle('autoCollectScrap', {
     Text = '自动捡废料',
     Desc = '传送至废料位置跳跃后等待2秒拾取',
@@ -1725,13 +1724,17 @@ AutoGroup:AddToggle('autoCollectScrap', {
         if Value then
             task.spawn(function()
                 while autoCollectScrap do
+                    -- 检查是否有任何高优先级任务正在运行
+                    if FromATM or FromBank or autobx or autozbd or autoTreasure or autoblock or automoss or autoxybs or autoxywp or autoptbs or automoney or card then
+                        task.wait(1)
+                        continue
+                    end
                     busy = true
                     local success = fastCollectItems({"Electronics", "Weapon Parts"})
                     if not success then
                         task.wait(1)
                     end
                     busy = false
-                    -- 不再强制传送回 idleLocation
                     task.wait(0.1)
                 end
             end)
@@ -1741,7 +1744,7 @@ AutoGroup:AddToggle('autoCollectScrap', {
     end
 })
 
--- 自动老虎机：执行期间阻止AFK传送，结束后不强制传送
+-- 自动老虎机：只在空闲时工作，不强制传送
 AutoGroup:AddToggle('autoSlotMachine', {
     Text = '自动老虎机',
     Desc = '固定6秒，连续2次未中奖则冷却30分钟',
@@ -1752,6 +1755,11 @@ AutoGroup:AddToggle('autoSlotMachine', {
             task.spawn(function()
                 local slotMachineCFrame = CFrame.new(845.6194458007812, 13.917967796325684, -917.5487670898438) * CFrame.new(0, -8, 0)
                 while autoSlotMachine do
+                    -- 检查是否有任何高优先级任务正在运行
+                    if FromATM or FromBank or autobx or autozbd or autoTreasure or autoblock or automoss or autoxybs or autoxywp or autoptbs or automoney or card then
+                        task.wait(1)
+                        continue
+                    end
                     busy = true
                     if slotMachineCooling then
                         task.wait(1)
@@ -1762,7 +1770,6 @@ AutoGroup:AddToggle('autoSlotMachine', {
                             slotMachineNoWinCount = 0
                         end
                         busy = false
-                        -- 不强制传送
                         continue
                     end
 
@@ -1838,7 +1845,6 @@ AutoGroup:AddToggle('autoSlotMachine', {
 
                     if lockConnection then lockConnection:Disconnect() end
                     busy = false
-                    -- 不强制传送
 
                     local finalSpins = LocalPlayer:GetAttribute("slotSpins") or 0
                     if not spinChanged and finalSpins == currentSpins then
@@ -1911,23 +1917,7 @@ AutoGroup:AddToggle('autoSell', { Text = '自动售卖全部物品', Default = f
     if Value then
         autoSellTask = task.spawn(function()
             while autoSellEnabled do
-                local success, sold = pcall(autoSellItems)
-                if success and sold then
-                    autoSellFailCount = 0
-                else
-                    autoSellFailCount = autoSellFailCount + 1
-                    local waitTime
-                    if autoSellFailCount == 1 then
-                        waitTime = 300
-                    elseif autoSellFailCount == 2 then
-                        waitTime = 600
-                    elseif autoSellFailCount == 3 then
-                        waitTime = 1800
-                    else
-                        waitTime = 600
-                    end
-                    task.wait(waitTime)
-                end
+                pcall(autoSellItems)
                 task.wait(0.1)
             end
         end)
