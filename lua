@@ -51,24 +51,39 @@ local function GUID()
     return devv.load("GUID")()
 end
 
--- ===== 挂机位置配置 =====
--- 宿傩 和 位置2 的坐标已互换
 local idleLocations = {
     ["TeTraX"] = CFrame.new(1653.397216796875, -16.95315170288086, -530.3738403320312),
     ["宿傩"] = CFrame.new(121.4214859008789, -42.42018508911133, -515.8087158203125),
     ["位置1"] = CFrame.new(439.01190185546875, -25.120525360107422, -822.7509155273438),
     ["位置2"] = CFrame.new(254.45443725585938, -127.82054138183594, -426.7384033203125),
     ["位置3"] = CFrame.new(490.7265930175781, -22.4210262298584, -272.43170166015625),
-    ["位置4"] = CFrame.new(160.63153076171875, -33.42034912109375, -445.28424072265625)
+    ["位置4"] = CFrame.new(160.63153076171875, -33.42034912109375, -445.28424072265625),
+    ["位置5"] = CFrame.new(584.040283203125, -86.82018280029297, -724.7525634765625)
 }
 local currentIdleName = "TeTraX"
 local currentMode = "AFK"
 local function getCurrentIdleCF()
     return idleLocations[currentIdleName] or idleLocations["TeTraX"]
 end
--- ==============================
 
-local maskBaseLocation = CFrame.new(604.114014, 5.09485245, -1018.1275)
+local maskLocations = {
+    ["黑色头巾"] = CFrame.new(604.114014, 5.09485245, -1018.1275, 0, 0, 1, 0, 1, -0, -1, 0, 0),
+    ["红色头巾"] = CFrame.new(604.021545, 4.99485302, -1025.21191, 0, 0, 1, 0, 1, -0, -1, 0, 0),
+    ["蓝色头巾"] = CFrame.new(604.113892, 5.09485245, -1010.82751, 0, 0, 1, 0, 1, -0, -1, 0, 0),
+    ["外科医生口罩"] = CFrame.new(1160.00659, 4.65769672, -975.317871, 0, 0, -1, 0, 1, 0, 1, 0, 0),
+    ["面具"] = CFrame.new(1438.61926, 6.60790443, -145.005386, 1, 0, 0, 0, 1, 0, 0, 0, 1)
+}
+local selectedMaskType = "黑色头巾"
+local maskAutoBuy = true
+
+local maskNames = {
+    ["黑色头巾"] = "Black Bandana",
+    ["红色头巾"] = "Red Bandana",
+    ["蓝色头巾"] = "Blue Bandana",
+    ["外科医生口罩"] = "Surgeon Mask",
+    ["面具"] = "Hockey Mask"
+}
+
 local grenadeBuyLocation = CFrame.new(659.044739, 5.77163315, -706.697632, -1.1920929e-07, 0, -1.00000012, 0, 1, 0, 1.00000012, 0, -1.1920929e-07)
 local bombThrowLocation = CFrame.new(1129.0994873046875, 14.843579292297363, -354.19488525390625)
 local bombTargetPosition = Vector3.new(1124.0853271484, 5.3128666877747, -357.68710327148)
@@ -77,6 +92,7 @@ local lockpickBuyLocation = CFrame.new(659.280029, 5.50683689, -716.48999, -1.19
 local vestBuyLocation = CFrame.new(659.063477, 6.21583509, -684.365051, -1.1920929e-07, 0, -1.00000012, 0, 1, 0, 1.00000012, 0, -1.1920929e-07)
 local bandageBuyLocation = CFrame.new(1168.04468, 25.0443974, -972.782654, 0, 0, -1, 0, 1, 0, 1, 0, 0)
 local flamethrowerBuyLocation = CFrame.new(1658.28564, 24.541769, -499.186249, 0, 0, -1, 0, 1, 0, 1, 0, 0)
+local rpgBuyLocation = CFrame.new(1145.82153, 25.5613174, -1322.12683, -0.173624277, 0, -0.984811902, 0, 1, 0, 0.984811902, 0, -0.173624277)
 
 local throwBuyLocations = {
     ["Ninja Star"] = CFrame.new(337.521484, 25.4010315, -169.487122, 1, 0, 0, 0, 1, 0, 0, 0, 1),
@@ -167,11 +183,14 @@ local openfake, fakemoney = false, 0
 local AntiDoll, AntiAdmin = false, false
 local busy = false
 local maskBuying = false
-local maskPurchased = false  -- 新增：口罩已购买标志
 
 local flameAttackEnabled = false
 local flameAttackDistance = 10000
 local hitPart = "Head"
+
+local rpgAttackEnabled = false
+local rpgAttackDistance = 100
+local rpgMinHealth = 0.3
 
 local autoUnlockEnabled = false
 local unlockAuraConnection = nil
@@ -186,10 +205,13 @@ local autoSellTask = nil
 
 local autoBuyGunAmmo = false
 local autoBuyFlameAmmo = false
+local autoBuyRPGAmmo = false
 local gunBuyTimer = 0
 local flameBuyTimer = 0
+local rpgBuyTimer = 0
 local gunBuyInterval = 10
-local flameBuyInterval = 10
+local flameBuyInterval = 15
+local rpgBuyInterval = 10
 local BUY_AMMO_COUNT = 10
 
 local lastAttack = 0
@@ -225,7 +247,6 @@ local autoGrab = false
 local itemAuraTimer = 0
 local ITEM_AURA_INTERVAL = 0.1
 
--- 老虎机冷却检测变量
 local slotMachineCooling = false
 local slotMachineCooldownTimer = 0
 local slotMachineCooldownDuration = 1800
@@ -336,7 +357,6 @@ local function onCharacterAdded(character)
         if flying then startFly() end
     end)
     maskBuying = false
-    maskPurchased = false  -- 角色重生后重置口罩标志
 
     task.wait(0.5)
     if aurablade then
@@ -344,6 +364,9 @@ local function onCharacterAdded(character)
     end
     if flameAttackEnabled then
         startFlameAttack()
+    end
+    if rpgAttackEnabled then
+        startRPGAttack()
     end
 end
 if LocalPlayer.Character then
@@ -803,35 +826,36 @@ end
 setupSilentAim()
 
 local function buyMaskIfNeeded()
-    if maskBuying or maskPurchased then return end  -- 如果已购买或正在购买则退出
+    if not maskAutoBuy or maskBuying then return end
     local char = LocalPlayer.Character
     if not char then return end
-    if char:FindFirstChild("Black Bandana") then
-        maskPurchased = true  -- 检测到已有口罩，标记为已购买
-        return
-    end
+
+    local maskName = maskNames[selectedMaskType]
+    if not maskName then return end
+
+    if char:FindFirstChild(maskName) then return end
 
     maskBuying = true
     local root = getRoot(char)
     if root then
+        local buyLoc = maskLocations[selectedMaskType]
         local offsetX = math.random(-8, 8)
         local offsetZ = math.random(-8, 8)
-        local randomPos = maskBaseLocation.Position + Vector3.new(offsetX, 0, offsetZ)
+        local randomPos = buyLoc.Position + Vector3.new(offsetX, 0, offsetZ)
         root.CFrame = CFrame.new(randomPos)
         task.wait(0.5)
 
-        InvokeServer("attemptPurchase", "Black Bandana")
+        InvokeServer("attemptPurchase", maskName)
         task.wait(0.3)
         for _, v in pairs(items) do
-            if v.name == "Black Bandana" then
+            if v.name == maskName then
                 FireServer("equip", v.guid)
                 FireServer("wearMask", v.guid)
-                maskPurchased = true  -- 购买并穿戴成功，标记为已购买
                 break
             end
         end
         local startTime = tick()
-        while not char:FindFirstChild("Black Bandana") and tick() - startTime < 2 do
+        while not char:FindFirstChild(maskName) and tick() - startTime < 2 do
             task.wait(0.1)
         end
         if currentMode == "AFK" then
@@ -847,7 +871,7 @@ local function runATMPhase()
     local root = getRoot(LocalPlayer.Character)
     if not root then return end
 
-    local originalCF = root.CFrame  -- 记录原始位置
+    local originalCF = root.CFrame
 
     local nearestATM, nearestDist = nil, math.huge
     for _, atm in ipairs(atms:GetChildren()) do
@@ -884,7 +908,7 @@ local function runATMPhase()
     if currentMode == "AFK" then
         root.CFrame = getCurrentIdleCF()
     else
-        root.CFrame = originalCF  -- Normal 模式返回原位置
+        root.CFrame = originalCF
     end
 end
 
@@ -917,7 +941,7 @@ local function tryBankHeist()
     local root = getRoot(LocalPlayer.Character)
     if not root then return false end
 
-    local originalCF = root.CFrame  -- 记录原始位置
+    local originalCF = root.CFrame
 
     root.CFrame = bombThrowLocation
     task.wait(0.3)
@@ -968,7 +992,7 @@ local function tryBankHeist()
         if currentMode == "AFK" then
             root.CFrame = getCurrentIdleCF()
         else
-            root.CFrame = originalCF  -- Normal 模式返回原位置
+            root.CFrame = originalCF
         end
     end
     return true
@@ -988,7 +1012,6 @@ local function runJewelPhase()
             root.CFrame = CFrame.new(descendant.Parent.Position)
             fireproximityprompt(descendant)
 
-            -- 任务结束后返回原位置或挂机点
             if currentMode == "AFK" then
                 root.CFrame = getCurrentIdleCF()
             else
@@ -1277,7 +1300,6 @@ local function stopItemAura()
     end
 end
 
--- 更新 idle 连接：AFK 模式强制传送，Normal 模式不传送
 local function updateIdleConnection()
     if idleConnection then idleConnection:Disconnect(); idleConnection = nil end
     if currentMode == "AFK" then
@@ -1310,6 +1332,35 @@ local function ensureSpecialWeapon(weaponName, buyLocation)
         end
     else
         FireServer("equip", guid)
+    end
+end
+
+local function ensureRPG()
+    local hasRPG = false
+    for _, v in pairs(items) do
+        if v.name == "RPG" or v.name == "Trident" then
+            hasRPG = true
+            FireServer("equip", v.guid)
+            break
+        end
+    end
+    if not hasRPG then
+        local root = getRoot(LocalPlayer.Character)
+        if root then
+            local originalCF = root.CFrame
+            root.CFrame = rpgBuyLocation
+            task.wait(0.5)
+            InvokeServer("attemptPurchase", "RPG")
+            task.wait(0.3)
+            refreshItems()
+            for _, v in pairs(items) do
+                if v.name == "RPG" then
+                    FireServer("equip", v.guid)
+                    break
+                end
+            end
+            root.CFrame = originalCF
+        end
     end
 end
 
@@ -1391,6 +1442,83 @@ local function startFlameAttack()
                                                         end
                                                     end
                                                 end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            task.wait(0.1)
+        end
+    end)
+end
+
+local function startRPGAttack()
+    task.spawn(function()
+        ensureRPG()
+        local same = {GUID()}
+        while rpgAttackEnabled do
+            if not LocalPlayer.Character or not getRoot(LocalPlayer.Character) then
+                task.wait(0.5)
+            else
+                local equippedItem = v3item.inventory.getEquippedItem()
+                if not equippedItem or (equippedItem.name ~= "RPG" and equippedItem.name ~= "Trident") then
+                    task.wait(0.1)
+                else
+                    local equippedGUID = equippedItem.guid
+                    local equippedName = equippedItem.name
+
+                    local friendIDs = {}
+                    for _, player in pairs(Players:GetPlayers()) do
+                        if player ~= LocalPlayer then
+                            local success, isFriend = pcall(function() return LocalPlayer:IsFriendsWith(player.UserId) end)
+                            if success and isFriend then
+                                table.insert(friendIDs, player.UserId)
+                            end
+                        end
+                    end
+
+                    local myRoot = getRoot(LocalPlayer.Character)
+                    if myRoot then
+                        for _, player in pairs(Players:GetPlayers()) do
+                            if not rpgAttackEnabled then break end
+                            if player ~= LocalPlayer and player.Character then
+                                local isTarget = false
+                                if #targetPlayers > 0 then
+                                    isTarget = tableFind(targetPlayers, player.Name)
+                                else
+                                    isTarget = true
+                                end
+
+                                if isTarget then
+                                    local isFriend = false
+                                    for _, friendID in pairs(friendIDs) do
+                                        if player.UserId == friendID then
+                                            isFriend = true
+                                            break
+                                        end
+                                    end
+                                    if not isFriend then
+                                        local character = player.Character
+                                        local humanoid = character:FindFirstChild("Humanoid")
+                                        local targetPart = character:FindFirstChild(hitPart)
+                                        local targetRoot = character:FindFirstChild("HumanoidRootPart")
+                                        if humanoid and targetPart and targetRoot and humanoid.Health > rpgMinHealth then
+                                            local distance = (myRoot.Position - targetRoot.Position).magnitude
+                                            if distance <= rpgAttackDistance then
+                                                local replicateArgs = {equippedGUID}
+                                                local projectileData = {{same[1], targetPart.CFrame}}
+                                                replicateArgs[2] = projectileData
+                                                replicateArgs[3] = "semi"
+                                                FireServer("replicateProjectiles", unpack(replicateArgs))
+                                                local rocketArgs = {same[1], GUID(), targetPart.Position}
+                                                for i = 1, 5 do
+                                                    FireServer("rocketHit", unpack(rocketArgs))
+                                                end
+                                                FireServer("reload", equippedGUID)
                                             end
                                         end
                                     end
@@ -1510,15 +1638,15 @@ task.spawn(function()
                 flameBuyTimer = 0
                 local equippedItem = v3item.inventory.getEquippedItem()
                 if equippedItem and (equippedItem.name == "Flamethrower" or equippedItem.name == "Acid Gun") then
-                    local buyLoc = flamethrowerBuyLocation
                     local root = getRoot(LocalPlayer.Character)
-                    if root and buyLoc then
+                    if root then
                         local originalCF = root.CFrame
+                        local buyLoc = flamethrowerBuyLocation
                         root.CFrame = buyLoc
-                        task.wait(0.5)
-                        for i = 1, BUY_AMMO_COUNT do
+                        local startTime = tick()
+                        while tick() - startTime < 2 do
                             InvokeServer("attemptPurchaseAmmo", equippedItem.name)
-                            task.wait(0.1)
+                            task.wait(0.05)
                         end
                         root.CFrame = originalCF
                     end
@@ -1526,6 +1654,30 @@ task.spawn(function()
             end
         else
             flameBuyTimer = 0
+        end
+
+        if autoBuyRPGAmmo and rpgAttackEnabled then
+            rpgBuyTimer = rpgBuyTimer + 1
+            if rpgBuyTimer >= rpgBuyInterval then
+                rpgBuyTimer = 0
+                local equippedItem = v3item.inventory.getEquippedItem()
+                if equippedItem and (equippedItem.name == "RPG" or equippedItem.name == "Trident") then
+                    local root = getRoot(LocalPlayer.Character)
+                    if root then
+                        local originalCF = root.CFrame
+                        local buyLoc = rpgBuyLocation
+                        root.CFrame = buyLoc
+                        local startTime = tick()
+                        while tick() - startTime < 3 do
+                            InvokeServer("attemptPurchaseAmmo", equippedItem.name)
+                            task.wait(0.05)
+                        end
+                        root.CFrame = originalCF
+                    end
+                end
+            end
+        else
+            rpgBuyTimer = 0
         end
     end
 end)
@@ -1565,6 +1717,34 @@ local function setupUI()
                 flameAttackEnabled = s
                 if s then
                     startFlameAttack()
+                end
+            end
+        })
+    end
+
+    do
+        local SpecialGroup2 = Tabs.SpecialAttack:AddRightGroupbox('RPG/三叉戟攻击')
+        SpecialGroup2:AddSlider('rpgDistance', {
+            Text = '攻击距离',
+            Min = 1,
+            Max = 5000,
+            Default = 100,
+            Callback = function(v) rpgAttackDistance = v end
+        })
+        SpecialGroup2:AddSlider('rpgMinHealth', {
+            Text = '最低血量',
+            Min = 0.1,
+            Max = 1,
+            Default = 0.3,
+            Callback = function(v) rpgMinHealth = v end
+        })
+        SpecialGroup2:AddToggle('rpgAttack', {
+            Text = 'RPG/三叉戟攻击',
+            Default = false,
+            Callback = function(s)
+                rpgAttackEnabled = s
+                if s then
+                    startRPGAttack()
                 end
             end
         })
@@ -1683,13 +1863,24 @@ local function setupUI()
             end
         })
         AmmoGroup:AddToggle('autoBuyFlameAmmo', {
-            Text = '火枪自动买弹药（火焰/酸液）',
-            Desc = '每10秒传送购买大量弹药',
+            Text = '喷火枪自动买弹药（火焰/酸液）',
+            Desc = '每15秒传送购买2秒弹药',
             Default = false,
             Callback = function(s)
                 autoBuyFlameAmmo = s
                 if s then
                     flameBuyTimer = 0
+                end
+            end
+        })
+        AmmoGroup:AddToggle('autoBuyRPGAmmo', {
+            Text = 'RPG自动买弹药（RPG/三叉戟）',
+            Desc = '每10秒传送购买3秒弹药',
+            Default = false,
+            Callback = function(s)
+                autoBuyRPGAmmo = s
+                if s then
+                    rpgBuyTimer = 0
                 end
             end
         })
@@ -1721,6 +1912,17 @@ local function setupUI()
 
     do
         local CombatGroup = Tabs.Ohio:AddRightGroupbox('战斗')
+
+        CombatGroup:AddDropdown('maskSelect', {
+            Text = '口罩选择',
+            Values = {'黑色头巾', '红色头巾', '蓝色头巾', '外科医生口罩', '面具'},
+            Default = '黑色头巾',
+            Callback = function(v)
+                selectedMaskType = v
+                maskAutoBuy = true
+            end
+        })
+
         CombatGroup:AddToggle('autoVest', { Text = '自动护甲', Default = false, Callback = function(s) autovest = s end })
         CombatGroup:AddToggle('autoHeal', { Text = '自动回血', Default = false, Callback = function(s) autohealth = s end })
         CombatGroup:AddToggle('autoMask', { Text = '自动口罩', Default = false, Callback = function(s) autokz = s end })
@@ -1744,7 +1946,6 @@ local function setupUI()
     do
         local AutoGroup = Tabs.Ohio:AddLeftGroupbox('自动')
 
-        -- 农场模式选择
         AutoGroup:AddDropdown('modeSelect', {
             Text = '农场模式',
             Values = {'AFK', 'Normal'},
@@ -1756,7 +1957,7 @@ local function setupUI()
         })
         AutoGroup:AddDropdown('idleSelect', {
             Text = '挂机位置',
-            Values = {'TeTraX', '宿傩', '位置1', '位置2', '位置3', '位置4'},
+            Values = {'TeTraX', '宿傩', '位置1', '位置2', '位置3', '位置4', '位置5'},
             Default = 'TeTraX',
             Callback = function(v)
                 currentIdleName = v
@@ -2332,9 +2533,9 @@ function combatTick()
         end
     end
 
-    if autokz then
+    if autokz and maskAutoBuy then
         local char = LocalPlayer.Character
-        if char and not char:FindFirstChild("Black Bandana") and not maskBuying and not maskPurchased then
+        if char and not char:FindFirstChild(maskNames[selectedMaskType]) and not maskBuying then
             task.spawn(buyMaskIfNeeded)
         end
     end
