@@ -55,10 +55,14 @@ local idleLocations = {
     ["TeTraX"] = CFrame.new(1653.397216796875, -16.95315170288086, -530.3738403320312),
     ["宿傩"] = CFrame.new(121.4214859008789, -42.42018508911133, -515.8087158203125),
     ["位置1"] = CFrame.new(439.01190185546875, -25.120525360107422, -822.7509155273438),
-    ["位置2"] = CFrame.new(254.45443725585938, -127.82054138183594, -426.7384033203125),
+    ["位置2"] = CFrame.new(386.4916076660156, 3.1478753089904785, -1359.7310791015625),
     ["位置3"] = CFrame.new(490.7265930175781, -22.4210262298584, -272.43170166015625),
     ["位置4"] = CFrame.new(160.63153076171875, -33.42034912109375, -445.28424072265625),
-    ["位置5"] = CFrame.new(584.040283203125, -86.82018280029297, -724.7525634765625)
+    ["位置5"] = CFrame.new(584.040283203125, -86.82018280029297, -724.7525634765625),
+    ["位置6"] = CFrame.new(1021.9706420898438, -21.59579086303711, 89.16853332519531),
+    ["位置7"] = CFrame.new(575.1665649414062, -40.00355911254883, -88.20584869384766),
+    ["位置8"] = CFrame.new(1410.9215087890625, -9.405234336853027, 714.591064453125),
+    ["位置9"] = CFrame.new(681.484619140625, -54.65692138671875, -337.3169860839844)
 }
 local currentIdleName = "TeTraX"
 local currentMode = "AFK"
@@ -889,11 +893,14 @@ local function runATMPhase()
     if not nearestATM then return end
 
     local main = nearestATM:FindFirstChild("Main")
-    local lockCF = CFrame.new(main.Position - Vector3.new(0, 4, 0)) * CFrame.Angles(math.rad(90), 0, 0)
+    local targetPos = main.Position + Vector3.new(0, -4, 0)
+    local backDir = -main.CFrame.LookVector
+    local yaw = math.atan2(backDir.X, backDir.Z)
+    local targetCF = CFrame.new(targetPos) * CFrame.Angles(math.rad(90), 0, yaw)
 
     local lockConn = RunService.Heartbeat:Connect(function()
         if root and root.Parent then
-            root.CFrame = lockCF
+            root.CFrame = targetCF
             root.Velocity = Vector3.zero
             root.RotVelocity = Vector3.zero
         end
@@ -958,22 +965,28 @@ local function tryBankHeist()
     local prompt = promptPart and promptPart:FindFirstChild("Attachment") and promptPart.Attachment:FindFirstChild("ProximityPrompt")
     if not prompt or not prompt.Enabled then return false end
 
+    root = getRoot(LocalPlayer.Character)
+    if not root then return false end
+
     root.CFrame = afterExplosionWaitLocation
     local lockPos = (afterExplosionWaitLocation * CFrame.new(0, 0, -4)).Position
     local lockCF = CFrame.new(lockPos) * CFrame.Angles(math.rad(90), 0, 0)
-    local endTime = tick() + 4
-    while tick() < endTime do
-        root = getRoot(LocalPlayer.Character)
-        if root then
-            root.CFrame = lockCF
-            root.Velocity = Vector3.zero
-        end
-        task.wait(0.2)
-    end
-
     local collectCF = CFrame.new((bank.BankCash.Pallet.CFrame * CFrame.new(0, -2, 0)).Position) * CFrame.Angles(math.rad(90), 0, 0)
-    root = getRoot(LocalPlayer.Character)
-    if root then root.CFrame = collectCF end
+
+    local lockConn
+    local currentLockCF = lockCF
+    lockConn = RunService.Heartbeat:Connect(function()
+        local currentRoot = getRoot(LocalPlayer.Character)
+        if currentRoot and currentRoot.Parent then
+            currentRoot.CFrame = currentLockCF
+            currentRoot.Velocity = Vector3.zero
+            currentRoot.RotVelocity = Vector3.zero
+        end
+    end)
+
+    task.wait(4)
+
+    currentLockCF = collectCF
 
     local cashConnection
     cashConnection = RunService.Heartbeat:Connect(function()
@@ -986,6 +999,7 @@ local function tryBankHeist()
 
     repeat task.wait(0.2) until not prompt.Enabled or #cashFolder:GetChildren() == 0
     if cashConnection then cashConnection:Disconnect() end
+    if lockConn then lockConn:Disconnect() end
 
     root = getRoot(LocalPlayer.Character)
     if root then
@@ -1957,7 +1971,7 @@ local function setupUI()
         })
         AutoGroup:AddDropdown('idleSelect', {
             Text = '挂机位置',
-            Values = {'TeTraX', '宿傩', '位置1', '位置2', '位置3', '位置4', '位置5'},
+            Values = {'TeTraX', '宿傩', '位置1', '位置2', '位置3', '位置4', '位置5', '位置6', '位置7', '位置8', '位置9'},
             Default = 'TeTraX',
             Callback = function(v)
                 currentIdleName = v
