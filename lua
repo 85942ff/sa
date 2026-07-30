@@ -167,6 +167,7 @@ local openfake, fakemoney = false, 0
 local AntiDoll, AntiAdmin = false, false
 local busy = false
 local maskBuying = false
+local maskPurchased = false  -- 新增：口罩已购买标志
 
 local flameAttackEnabled = false
 local flameAttackDistance = 10000
@@ -335,6 +336,7 @@ local function onCharacterAdded(character)
         if flying then startFly() end
     end)
     maskBuying = false
+    maskPurchased = false  -- 角色重生后重置口罩标志
 
     task.wait(0.5)
     if aurablade then
@@ -801,10 +803,13 @@ end
 setupSilentAim()
 
 local function buyMaskIfNeeded()
-    if maskBuying then return end
+    if maskBuying or maskPurchased then return end  -- 如果已购买或正在购买则退出
     local char = LocalPlayer.Character
     if not char then return end
-    if char:FindFirstChild("Black Bandana") then return end
+    if char:FindFirstChild("Black Bandana") then
+        maskPurchased = true  -- 检测到已有口罩，标记为已购买
+        return
+    end
 
     maskBuying = true
     local root = getRoot(char)
@@ -821,6 +826,7 @@ local function buyMaskIfNeeded()
             if v.name == "Black Bandana" then
                 FireServer("equip", v.guid)
                 FireServer("wearMask", v.guid)
+                maskPurchased = true  -- 购买并穿戴成功，标记为已购买
                 break
             end
         end
@@ -1091,7 +1097,6 @@ local function runItemFindPhase()
         end
     end
 
-    -- 每个物品拾取后，Normal 模式下返回原位（由 Autoitem 内部恢复）
     return did
 end
 
@@ -2329,7 +2334,7 @@ function combatTick()
 
     if autokz then
         local char = LocalPlayer.Character
-        if char and not char:FindFirstChild("Black Bandana") and not maskBuying then
+        if char and not char:FindFirstChild("Black Bandana") and not maskBuying and not maskPurchased then
             task.spawn(buyMaskIfNeeded)
         end
     end
