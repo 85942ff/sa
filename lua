@@ -70,6 +70,8 @@ local function getCurrentIdleCF()
     return idleLocations[currentIdleName] or idleLocations["TeTraX"]
 end
 
+local atmYawOffset = 0
+
 local maskLocations = {
     ["黑色头巾"] = CFrame.new(604.114014, 5.09485245, -1018.1275, 0, 0, 1, 0, 1, -0, -1, 0, 0),
     ["红色头巾"] = CFrame.new(604.021545, 4.99485302, -1025.21191, 0, 0, 1, 0, 1, -0, -1, 0, 0),
@@ -895,7 +897,7 @@ local function runATMPhase()
     local main = nearestATM:FindFirstChild("Main")
     local targetPos = main.Position + Vector3.new(0, -4, 0)
     local backDir = -main.CFrame.LookVector
-    local yaw = math.atan2(backDir.X, backDir.Z)
+    local yaw = math.atan2(backDir.X, backDir.Z) + atmYawOffset
     local targetCF = CFrame.new(targetPos) * CFrame.Angles(math.rad(90), 0, yaw)
 
     local lockConn = RunService.Heartbeat:Connect(function()
@@ -1980,6 +1982,17 @@ local function setupUI()
         })
         AutoGroup:AddDivider()
 
+        AutoGroup:AddSlider('atmYawOffset', {
+            Text = 'ATM方向偏移（度）',
+            Desc = '调整头部朝向ATM机背面的偏航角度偏移（-180 ~ 180度）',
+            Min = -180,
+            Max = 180,
+            Default = 0,
+            Callback = function(v)
+                atmYawOffset = math.rad(v)
+            end
+        })
+
         AutoGroup:AddToggle('autoATM', { Text = '自动摧毁ATM', Default = false, Callback = function(s) FromATM = s end })
         AutoGroup:AddToggle('autoBank', { Text = '自动偷盗银行', Default = false, Callback = function(s) FromBank = s end })
 
@@ -2504,9 +2517,9 @@ function combatTick()
                     busy = true
                     local originalCF = root.CFrame
                     root.CFrame = vestBuyLocation
-                    task.wait(0.5)
+                    task.wait(0.1)  -- 原为0.5，改为0.1
                     InvokeServer("attemptPurchase", "Light Vest")
-                    task.wait(0.5)
+                    task.wait(0.1)  -- 原为0.5，改为0.1
                     refreshItems()
                     root.CFrame = originalCF
                     busy = false
@@ -2531,9 +2544,9 @@ function combatTick()
                         busy = true
                         local originalCF = root.CFrame
                         root.CFrame = bandageBuyLocation
-                        task.wait(0.5)
+                        task.wait(0.1)  -- 原为0.5，改为0.1
                         InvokeServer("attemptPurchase", "Bandage")
-                        task.wait(0.5)
+                        task.wait(0.1)  -- 原为0.5，改为0.1
                         refreshItems()
                         root.CFrame = originalCF
                         busy = false
