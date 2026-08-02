@@ -70,6 +70,8 @@ local function getCurrentIdleCF()
     return idleLocations[currentIdleName] or idleLocations["TeTraX"]
 end
 
+local atmYawOffset = 0
+
 local maskLocations = {
     ["黑色头巾"] = CFrame.new(604.114014, 5.09485245, -1018.1275, 0, 0, 1, 0, 1, -0, -1, 0, 0),
     ["红色头巾"] = CFrame.new(604.021545, 4.99485302, -1025.21191, 0, 0, 1, 0, 1, -0, -1, 0, 0),
@@ -895,7 +897,7 @@ local function runATMPhase()
     local main = nearestATM:FindFirstChild("Main")
     local targetPos = main.Position + Vector3.new(0, -4, 0)
     local backDir = -main.CFrame.LookVector
-    local yaw = math.atan2(backDir.X, backDir.Z)
+    local yaw = math.atan2(backDir.X, backDir.Z) + atmYawOffset
     local targetCF = CFrame.new(targetPos) * CFrame.Angles(math.rad(90), 0, yaw)
 
     local lockConn = RunService.Heartbeat:Connect(function()
@@ -2290,41 +2292,140 @@ local function setupUI()
     end
 
     do
-        local CounterGroup = Tabs.Ohio:AddLeftGroupbox('反制')
-        CounterGroup:AddButton('重新进入服务器', function() game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer) end)
-        local toastMsg, toastTime = "", 5
-        CounterGroup:AddInput('toastMsg', { Text = '弹窗内容', Default = '', Callback = function(v) toastMsg = v end })
-        CounterGroup:AddInput('toastTime', { Text = '弹窗时长(秒)', Default = '5', Callback = function(v) toastTime = tonumber(v) or 5 end })
-        CounterGroup:AddButton('发送弹窗', function() loadModule("makeToast")(toastMsg, "rainbow", toastTime) end)
-        CounterGroup:AddButton('通话禁音', function() FireServer("setAirplaneMode", true); LocalPlayer:SetAttribute('isAirplaneMode', true) end)
-        CounterGroup:AddButton('不允许战斗中', function()
-            local combatIndicator = require(ReplicatedStorage.devv.client.Helpers.ui.combatIndicator)
-            hookfunction(combatIndicator.isInCombat, function() return false end)
-            hookfunction(combatIndicator.enterCombat, function() end)
-        end)
-        CounterGroup:AddButton('不允许被抓取', function()
-            local GrabHandler = require(ReplicatedStorage.devv.client.Handlers.GrabHandler)
-            local oldCheck = GrabHandler.CheckValid
-            GrabHandler.CheckValid = function(self, p29, p30) if p29 == LocalPlayer then return false end; return oldCheck(self, p29, p30) end
-            local oldGrab = GrabHandler.Grab
-            GrabHandler.Grab = function(self, p55) if p55 == LocalPlayer then return end; return oldGrab(self, p55) end
-        end)
-        CounterGroup:AddButton('清除树叶', function()
-            for _, v in workspace:GetDescendants() do if v.Name == "Leaves" and v:IsA("MeshPart") then v:Destroy() end end
-        end)
-        CounterGroup:AddButton('反坐下', function()
-            local function antiSit(char)
-                local hum = char:WaitForChild("Humanoid")
-                hum:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
-                hum:GetPropertyChangedSignal("Sit"):Connect(function() if hum.Sit then hum.Sit = false end end)
-                hum.Sit = false
+    local CounterGroup = Tabs.Ohio:AddLeftGroupbox('反制')
+    CounterGroup:AddButton('重新进入服务器', function()
+        game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+    end)
+
+    -- 弹窗目标玩家选择（默认"关闭"=全体除好友）
+    local toastTarget = "关闭"
+    local toastTargetDropdown = CounterGroup:AddDropdown('toastTargetSelect', {
+        Text = '弹窗目标',
+        Values = {'关闭'},
+        Default = '关闭',
+        Callback = function(v)
+            toastTarget = v
+        end
+    })
+
+    local function refreshToastTargets()
+        local names = {"关闭"}
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                local success, isFriend = pcall(function()
+                    return LocalPlayer:IsFriendsWith(player.UserId)
+                end)
+                if not success or not isFriend then
+                    table.insert(names, player.Name)
+                end
             end
-            if LocalPlayer.Character then antiSit(LocalPlayer.Character) end
-            LocalPlayer.CharacterAdded:Connect(antiSit)
-        end)
-        CounterGroup:AddToggle('antiDoll', { Text = '反布娃娃', Default = false, Callback = function(s) AntiDoll = s end })
-        CounterGroup:AddToggle('antiAdmin', { Text = '反管理', Default = false, Callback = function(s) AntiAdmin = s end })
+        end
+        if toastTargetDropdown then
+            pcall(function()
+                if toastTargetDropdown.SetValues then
+                    toastTargetDropdown:SetValues(names)
+                elseif toastTargetDropdown.SetOptions then
+                    toastTargetDropdown:SetOptions(names)
+                elseif toastTargetDropdown.Refresh then
+                    toastTargetDropdown:Refresh(names, true)
+                elseif toastTargetDropdown.Values ~= nil then
+                    toastTargetDropdown.Values = names
+                end
+            end)
+        end
     end
+
+    task.spawn(function()
+        while true do
+            task.wait(0.5)
+            refreshToastTargets()
+        end
+    end)
+
+    local toastMsg, toastTime = "", 5
+    CounterGroup:AddInput('toastMsg', {
+        Text = '弹窗内容',
+        Default = '',
+        Callback = function(v) toastMsg = v end
+    })
+    CounterGroup:AddInput('toastTime', {
+        Text = '弹窗时长(秒)',
+        Default = '5',
+        Callback = function(v) toastTime = tonumber(v) or 5 end
+    })
+
+    CounterGroup:AddButton('发送弹窗', function()
+        if toastTarget == "关闭" then
+            -- 全体发送（除好友外）
+            loadModule("makeToast")(toastMsg, "rainbow", toastTime)
+        else
+            -- 发送给特定玩家
+            local targetPlayer = Players:FindFirstChild(toastTarget)
+            if targetPlayer then
+                -- 尝试通过游戏聊天发送私信
+                local chatService = game:GetService("Chat")
+                if chatService and chatService.Chat then
+                    chatService:Chat("/msg " .. targetPlayer.Name .. " " .. toastMsg)
+                end
+
+                -- 本地提示（作为反馈）
+                Library:Notify({
+                    Text = "已尝试向 " .. targetPlayer.Name .. " 发送弹窗: " .. toastMsg,
+                    Duration = 3,
+                    Icon = "info"
+                })
+            else
+                Library:Notify({
+                    Text = "目标玩家不存在！",
+                    Duration = 2,
+                    Icon = "warning"
+                })
+            end
+        end
+    end)
+
+    CounterGroup:AddButton('通话禁音', function()
+        FireServer("setAirplaneMode", true)
+        LocalPlayer:SetAttribute('isAirplaneMode', true)
+    end)
+    CounterGroup:AddButton('不允许战斗中', function()
+        local combatIndicator = require(ReplicatedStorage.devv.client.Helpers.ui.combatIndicator)
+        hookfunction(combatIndicator.isInCombat, function() return false end)
+        hookfunction(combatIndicator.enterCombat, function() end)
+    end)
+    CounterGroup:AddButton('不允许被抓取', function()
+        local GrabHandler = require(ReplicatedStorage.devv.client.Handlers.GrabHandler)
+        local oldCheck = GrabHandler.CheckValid
+        GrabHandler.CheckValid = function(self, p29, p30)
+            if p29 == LocalPlayer then return false end
+            return oldCheck(self, p29, p30)
+        end
+        local oldGrab = GrabHandler.Grab
+        GrabHandler.Grab = function(self, p55)
+            if p55 == LocalPlayer then return end
+            return oldGrab(self, p55)
+        end
+    end)
+    CounterGroup:AddButton('清除树叶', function()
+        for _, v in workspace:GetDescendants() do
+            if v.Name == "Leaves" and v:IsA("MeshPart") then v:Destroy() end
+        end
+    end)
+    CounterGroup:AddButton('反坐下', function()
+        local function antiSit(char)
+            local hum = char:WaitForChild("Humanoid")
+            hum:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
+            hum:GetPropertyChangedSignal("Sit"):Connect(function()
+                if hum.Sit then hum.Sit = false end
+            end)
+            hum.Sit = false
+        end
+        if LocalPlayer.Character then antiSit(LocalPlayer.Character) end
+        LocalPlayer.CharacterAdded:Connect(antiSit)
+    end)
+    CounterGroup:AddToggle('antiDoll', { Text = '反布娃娃', Default = false, Callback = function(s) AntiDoll = s end })
+    CounterGroup:AddToggle('antiAdmin', { Text = '反管理', Default = false, Callback = function(s) AntiAdmin = s end })
+end
 
     do
         local BypassGroup = Tabs.Ohio:AddRightGroupbox('绕过')
