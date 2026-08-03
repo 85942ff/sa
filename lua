@@ -10,7 +10,7 @@ Library.NotifySide = "Right"
 
 local Window = Library:CreateWindow({
     Title = ' Ohio | Lua',
-    Footer = "NOLSAKEN Team",
+    Footer = "Lua Team",
     Center = true,
     AutoShow = true,
     Resizable = true,
@@ -229,23 +229,17 @@ local espLoopConnection
 local auraConnection
 local fakeConnection
 local idleConnection
-local buyLoopConnection
 
 local autoCraftEnabled = false
 local autoClaimEnabled = false
-local craftConnection
 local autoStoreGems = false
-local storeConnection
 
 local autoRewardEnabled = false
 local autoRewardConnection = nil
 
 local autoCollectTruckCash = false
-local autoCollectTruckCashConnection = nil
 local autoCollectScrap = false
-local autoCollectScrapConnection = nil
 local autoSlotMachine = false
-local autoSlotMachineConnection = nil
 
 local autoStomp = false
 local autoGrab = false
@@ -253,12 +247,14 @@ local autoGrab = false
 local itemAuraTimer = 0
 local ITEM_AURA_INTERVAL = 0.1
 
-local slotMachineCooling = false
-local slotMachineCooldownTimer = 0
-local slotMachineCooldownDuration = 1800
-local slotMachineNoWinCount = 0
-local slotMachineMaxNoWin = 2
-local slotMachineLastSpins = 0
+local punchType = "meleepunch"
+local punchRunning = false
+local punchConnection = nil
+
+local autoCashRegister = false
+local autoGemRubble = false
+local gemRubbleCooldown = 0
+local gemRubbleCooldownTime = 30
 
 local function fastCollectItems(itemNames)
     local character = LocalPlayer.Character
@@ -769,6 +765,8 @@ local function auraHeartbeat()
     local targetHead = nil
     local minDist = math.huge
 
+    local shouldSkipFriend = (#targetPlayers == 0)
+
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
             local isTarget = false
@@ -778,7 +776,12 @@ local function auraHeartbeat()
                 isTarget = true
             end
 
-            if isTarget and not player.Character:FindFirstChildOfClass("ForceField") and not LocalPlayer:IsFriendsWith(player.UserId) then
+            if isTarget and not player.Character:FindFirstChildOfClass("ForceField") then
+                if shouldSkipFriend then
+                    if LocalPlayer:IsFriendsWith(player.UserId) then
+                        continue
+                    end
+                end
                 local head = player.Character.Head
                 local dist = (myRoot.Position - head.Position).Magnitude
                 if dist < minDist and (head.Position - avoidPosition).Magnitude > avoidRadius then
@@ -938,6 +941,47 @@ local function ensureItem(itemName, buyLocation)
     return nil
 end
 
+local function tryGemRubble()
+    local rubble = workspace:FindFirstChild("GemRobbery") and workspace.GemRobbery:FindFirstChild("Rubble")
+    if not rubble or not rubble:IsDescendantOf(workspace) then return false end
+
+    local tntGuid = getGuid("TNT")
+    if not tntGuid then
+        local root = getRoot(LocalPlayer.Character)
+        if not root then return false end
+        local originalCF = root.CFrame
+        root.CFrame = grenadeBuyLocation
+        task.wait(0.5)
+        InvokeServer("attemptPurchase", "TNT")
+        task.wait(0.5)
+        refreshItems()
+        tntGuid = getGuid("TNT")
+        root.CFrame = originalCF
+        if not tntGuid then return false end
+    end
+
+    local root = getRoot(LocalPlayer.Character)
+    if not root then return false end
+    local originalCF = root.CFrame
+
+    local standCFrame = CFrame.new(1694, 22, -725)
+    local throwTarget = Vector3.new(1700, 16, -721)
+
+    root.CFrame = standCFrame
+    FireServer("equip", tntGuid)
+    task.wait(0.2)
+    FireServer("throwItem", tntGuid, Vector3.new(5.2, 29.9, 79.3), throwTarget)
+    task.wait(0.5)
+    FireServer("removeItem", tntGuid)
+
+    if currentMode == "AFK" then
+        root.CFrame = getCurrentIdleCF()
+    else
+        root.CFrame = originalCF
+    end
+    return true
+end
+
 local function tryBankHeist()
     local bank = workspace:FindFirstChild("BankRobbery")
     if not bank then return false end
@@ -1037,55 +1081,6 @@ local function runJewelPhase()
         end
     end
     return false
-end
-
-local function runTreasurePhase()
-    local treasureGuid = getGuid("Treasure Map")
-    if not treasureGuid then return false end
-
-    local equipped = v3item.inventory.getEquippedItem()
-    if not equipped or equipped.name ~= "Treasure Map" then
-        FireServer("equip", treasureGuid)
-        task.wait(0.3)
-    end
-
-    local root = getRoot(LocalPlayer.Character)
-    if not root then return false end
-    local originalCF = root.CFrame
-
-    local debris = workspace.Game.Local.Debris
-    local marker = nil
-    for _, treasure in pairs(debris:GetChildren()) do
-        if treasure.Name == "TreasureMarker" then
-            marker = treasure
-            break
-        end
-    end
-    if not marker then return false end
-
-    root.CFrame = marker.CFrame
-    local prompt = marker:FindFirstChild("ProximityPrompt", true)
-    if prompt then
-        fireproximityprompt(prompt)
-    end
-
-    local startTime = tick()
-    while autoTreasure and tick() - startTime < 10 do
-        task.wait(0.2)
-        equipped = v3item.inventory.getEquippedItem()
-        if not equipped or equipped.name ~= "Treasure Map" then
-            break
-        end
-    end
-
-    if root and root.Parent then
-        if currentMode == "AFK" then
-            root.CFrame = getCurrentIdleCF()
-        else
-            root.CFrame = originalCF
-        end
-    end
-    return true
 end
 
 local function runItemFindPhase()
@@ -1620,6 +1615,97 @@ local function grabAura()
     end
 end
 
+local function executeCashRegister()
+    local regFolder = workspace:FindFirstChild("Game") and workspace.Game:FindFirstChild("Props") and workspace.Game.Props:FindFirstChild("CashRegister")
+    if not regFolder then return false end
+    local aliveRegs = {}
+    for _, v in pairs(regFolder:GetChildren()) do
+        if v:IsA("Model") and v:GetAttribute("state") ~= "destroyed" then
+            table.insert(aliveRegs, v)
+        end
+    end
+    if #aliveRegs == 0 then return false end
+
+    local fistsGuid = nil
+    for _, v in pairs(items) do
+        if v.name == "Fists" then
+            fistsGuid = v.guid
+            break
+        end
+    end
+    if not fistsGuid then return false end
+
+    local root = getRoot(LocalPlayer.Character)
+    if not root then return false end
+
+    for _, target in ipairs(aliveRegs) do
+        if not autoCashRegister then break end
+        local targetCFrame = target.WorldPivot * CFrame.new(0, -5, 0) * CFrame.Angles(math.rad(90), 0, 0)
+        root.CFrame = targetCFrame
+        FireServer("equip", fistsGuid)
+        local lockConn = RunService.Heartbeat:Connect(function()
+            if root and root.Parent then
+                root.CFrame = targetCFrame
+                root.Velocity = Vector3.zero
+                root.RotVelocity = Vector3.zero
+            end
+        end)
+        local startTime = tick()
+        while tick() - startTime < 2 do
+            if not autoCashRegister then break end
+            for _, reg in ipairs(aliveRegs) do
+                local rGuid = reg:GetAttribute("guid")
+                if rGuid and reg:GetAttribute("state") ~= "destroyed" and (root.Position - reg.WorldPivot.Position).Magnitude <= 30 then
+                    pcall(function()
+                        local attackName = tostring(getupvalue(Signal.FireServer, 1)["attackMeleeHit"])
+                        game:GetService("ReplicatedStorage").devv.remoteStorage[attackName]:FireServer("prop", {meleeType = "meleepunch", guid = rGuid})
+                    end)
+                end
+            end
+            task.wait(0.1)
+        end
+        if lockConn then lockConn:Disconnect() end
+    end
+    return true
+end
+
+local function startPunchAura()
+    if punchRunning then return end
+    punchRunning = true
+    punchConnection = RunService.RenderStepped:Connect(function()
+        if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then return end
+        local fistsGuid = nil
+        for _, v in pairs(items) do
+            if v.name == "Fists" then
+                fistsGuid = v.guid
+                break
+            end
+        end
+        if not fistsGuid then return end
+        local myPos = LocalPlayer.Character.HumanoidRootPart.Position
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
+                if (myPos - player.Character.HumanoidRootPart.Position).Magnitude <= 35 then
+                    task.spawn(function()
+                        FireServer("equip", fistsGuid)
+                        pcall(function()
+                            FireServer("attackMeleeHit", "player", {meleeType = punchType, hitPlayerId = player.UserId, weaponGUID = fistsGuid})
+                        end)
+                    end)
+                end
+            end
+        end
+    end)
+end
+
+local function stopPunchAura()
+    punchRunning = false
+    if punchConnection then
+        punchConnection:Disconnect()
+        punchConnection = nil
+    end
+end
+
 task.spawn(function()
     while true do
         task.wait(1)
@@ -1957,6 +2043,26 @@ local function setupUI()
             Default = false,
             Callback = function(s) autoGrab = s end
         })
+        CombatGroup:AddDivider()
+        CombatGroup:AddDropdown('punchTypeSelect', {
+            Text = '一拳类型',
+            Values = {'普通拳', '超级拳'},
+            Default = '普通拳',
+            Callback = function(val)
+                punchType = val == '普通拳' and 'meleepunch' or 'meleemegapunch'
+            end
+        })
+        CombatGroup:AddToggle('onePunchAura', {
+            Text = '启用一拳光环',
+            Default = false,
+            Callback = function(state)
+                if state then
+                    startPunchAura()
+                else
+                    stopPunchAura()
+                end
+            end
+        })
     end
 
     do
@@ -1984,6 +2090,23 @@ local function setupUI()
 
         AutoGroup:AddToggle('autoATM', { Text = '自动摧毁ATM', Default = false, Callback = function(s) FromATM = s end })
         AutoGroup:AddToggle('autoBank', { Text = '自动偷盗银行', Default = false, Callback = function(s) FromBank = s end })
+        AutoGroup:AddToggle('autoCashRegister', {
+            Text = '自动收银机',
+            Desc = '依次攻击每个收银机，每个停留2秒（固定位置）',
+            Default = false,
+            Callback = function(s)
+                autoCashRegister = s
+            end
+        })
+        AutoGroup:AddToggle('autoGemRubble', {
+            Text = '自动炸珠宝店',
+            Desc = '用TNT炸开岩石（每30秒一次）',
+            Default = false,
+            Callback = function(s)
+                autoGemRubble = s
+                if not s then gemRubbleCooldown = 0 end
+            end
+        })
 
         AutoGroup:AddToggle('autoCollectTruckCash', {
             Text = '自动收集装甲车现金',
@@ -1994,31 +2117,23 @@ local function setupUI()
                 if s then
                     task.spawn(function()
                         while autoCollectTruckCash do
-                            local character = LocalPlayer.Character
-                            if not character then task.wait(0.5) break end
-                            local rootPart = character:FindFirstChild("HumanoidRootPart")
-                            if not rootPart then task.wait(0.5) break end
-                            for _, vehicle in pairs(workspace.Game.Vehicles:GetChildren()) do
-                                if not autoCollectTruckCash then break end
-                                if vehicle.Name == "Armored Truck" and vehicle:FindFirstChild("TruckCash") and vehicle:FindFirstChild("PrimaryPart") then
-                                    local distance = (rootPart.Position - vehicle.PrimaryPart.Position).magnitude
-                                    if distance <= 100 then
-                                        local originalCF = rootPart.CFrame
+                            local rootPart = getRoot(LocalPlayer.Character)
+                            if rootPart then
+                                for _, vehicle in pairs(workspace.Game.Vehicles:GetChildren()) do
+                                    if vehicle.Name == "Armored Truck" and vehicle:FindFirstChild("TruckCash") and (rootPart.Position - vehicle.PrimaryPart.Position).magnitude <= 100 then
+                                        local orig = rootPart.CFrame
                                         rootPart.CFrame = vehicle.PrimaryPart.CFrame
-                                        local truckCash = vehicle:FindFirstChild("TruckCash")
-                                        if truckCash and truckCash:FindFirstChild("Main") then
-                                            local prompt = truckCash.Main:FindFirstChild("Attachment")
+                                        local prompt = vehicle.TruckCash.Main:FindFirstChild("Attachment")
+                                        if prompt then
+                                            prompt = prompt:FindFirstChild("ProximityPrompt")
                                             if prompt then
-                                                prompt = prompt:FindFirstChild("ProximityPrompt")
-                                                if prompt then
-                                                    prompt.RequiresLineOfSight = false
-                                                    prompt.HoldDuration = 0
-                                                    fireproximityprompt(prompt)
-                                                    task.wait(0.5)
-                                                end
+                                                prompt.RequiresLineOfSight = false
+                                                prompt.HoldDuration = 0
+                                                fireproximityprompt(prompt)
+                                                task.wait(0.5)
                                             end
                                         end
-                                        rootPart.CFrame = originalCF
+                                        rootPart.CFrame = orig
                                     end
                                 end
                             end
@@ -2061,33 +2176,16 @@ local function setupUI()
 
         AutoGroup:AddToggle('autoSlotMachine', {
             Text = '自动老虎机',
-            Desc = '固定6秒，连续2次未中奖则冷却30分钟',
+            Desc = '传送至老虎机前自动旋转',
             Default = false,
             Callback = function(s)
                 autoSlotMachine = s
                 if s then
                     task.spawn(function()
-                        local slotMachineCFrame = CFrame.new(845.6194458007812, 13.917967796325684, -917.5487670898438) * CFrame.new(0, -8, 0)
+                        local slotMachineCFrame = CFrame.new(846.239685, 0.435377538, -919.226746, -0.999359787, 0.0311656408, 0.0175692085, 0.0265386514, 0.975102663, -0.220160127, -0.0239932127, -0.219552919, -0.975305498) * CFrame.new(10, -1.6, -5)
                         while autoSlotMachine do
-                            if FromATM or FromBank or autobx or autozbd or autoTreasure or autoblock or automoss or autoxybs or autoxywp or autoptbs or automoney or card then
-                                task.wait(1)
-                                continue
-                            end
-                            busy = true
-                            if slotMachineCooling then
-                                task.wait(1)
-                                slotMachineCooldownTimer = slotMachineCooldownTimer + 1
-                                if slotMachineCooldownTimer >= slotMachineCooldownDuration then
-                                    slotMachineCooling = false
-                                    slotMachineCooldownTimer = 0
-                                    slotMachineNoWinCount = 0
-                                end
-                                busy = false
-                                continue
-                            end
-
-                            local serverFurniture = workspace:FindFirstChild("ServerFurniture")
                             local hasSlotMachine = false
+                            local serverFurniture = workspace:FindFirstChild("ServerFurniture")
                             if serverFurniture then
                                 for _, furniture in pairs(serverFurniture:GetDescendants()) do
                                     if furniture:GetAttribute("furnitureName") == "SlotMachine" then
@@ -2096,89 +2194,42 @@ local function setupUI()
                                     end
                                 end
                             end
-
                             if not hasSlotMachine then
                                 task.wait(1)
-                                busy = false
                                 continue
                             end
-
                             local character = LocalPlayer.Character
-                            if not character then
-                                busy = false
-                                task.wait(0.5)
-                                continue
-                            end
-                            local rootPart = character:FindFirstChild("HumanoidRootPart")
-                            if not rootPart then
-                                busy = false
-                                task.wait(0.5)
-                                continue
-                            end
-
+                            if not character then task.wait(0.5) continue end
+                            local rootPart = getRoot(character)
+                            if not rootPart then task.wait(0.5) continue end
                             rootPart.CFrame = slotMachineCFrame
-
-                            local lockConnection = RunService.Heartbeat:Connect(function()
+                            local lockConn = RunService.Heartbeat:Connect(function()
                                 if rootPart and rootPart.Parent then
                                     rootPart.CFrame = slotMachineCFrame
                                     rootPart.Velocity = Vector3.zero
                                     rootPart.RotVelocity = Vector3.zero
                                 end
                             end)
-
-                            local currentSpins = LocalPlayer:GetAttribute("slotSpins") or 0
-                            local startTime = tick()
-                            local spinChanged = false
-
-                            while autoSlotMachine and (tick() - startTime) < 6 do
-                                if serverFurniture then
-                                    for _, furniture in pairs(serverFurniture:GetDescendants()) do
-                                        if furniture:GetAttribute("furnitureName") == "SlotMachine" then
-                                            local prompt = furniture:FindFirstChild("Attachment", true)
+                            while autoSlotMachine and (LocalPlayer:GetAttribute("slotSpins") or 0) > 0 do
+                                for _, furniture in pairs(serverFurniture:GetDescendants()) do
+                                    if furniture:GetAttribute("furnitureName") == "SlotMachine" then
+                                        local prompt = furniture:FindFirstChild("Attachment", true)
+                                        if prompt then
+                                            prompt = prompt:FindFirstChild("ProximityPrompt")
                                             if prompt then
-                                                prompt = prompt:FindFirstChild("ProximityPrompt")
-                                                if prompt then
-                                                    prompt.MaxActivationDistance = 40
-                                                    if (LocalPlayer:GetAttribute("slotSpins") or 0) > 0 then
-                                                        fireproximityprompt(prompt)
-                                                    end
-                                                end
+                                                prompt.MaxActivationDistance = 40
+                                                fireproximityprompt(prompt)
                                             end
-                                            break
                                         end
+                                        break
                                     end
-                                end
-                                local newSpins = LocalPlayer:GetAttribute("slotSpins") or 0
-                                if newSpins ~= currentSpins then
-                                    spinChanged = true
-                                    currentSpins = newSpins
                                 end
                                 task.wait(0.5)
                             end
-
-                            if lockConnection then lockConnection:Disconnect() end
-                            busy = false
-
-                            local finalSpins = LocalPlayer:GetAttribute("slotSpins") or 0
-                            if not spinChanged and finalSpins == currentSpins then
-                                slotMachineNoWinCount = slotMachineNoWinCount + 1
-                            else
-                                slotMachineNoWinCount = 0
-                            end
-
-                            if slotMachineNoWinCount >= slotMachineMaxNoWin then
-                                slotMachineCooling = true
-                                slotMachineCooldownTimer = 0
-                                slotMachineNoWinCount = 0
-                            end
-
-                            if not autoSlotMachine then break end
-                            task.wait(0.5)
+                            if lockConn then lockConn:Disconnect() end
+                            task.wait(1)
                         end
-                        busy = false
                     end)
-                else
-                    busy = false
                 end
             end
         })
@@ -2292,140 +2343,134 @@ local function setupUI()
     end
 
     do
-    local CounterGroup = Tabs.Ohio:AddLeftGroupbox('反制')
-    CounterGroup:AddButton('重新进入服务器', function()
-        game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
-    end)
+        local CounterGroup = Tabs.Ohio:AddLeftGroupbox('反制')
+        CounterGroup:AddButton('重新进入服务器', function()
+            game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+        end)
 
-    -- 弹窗目标玩家选择（默认"关闭"=全体除好友）
-    local toastTarget = "关闭"
-    local toastTargetDropdown = CounterGroup:AddDropdown('toastTargetSelect', {
-        Text = '弹窗目标',
-        Values = {'关闭'},
-        Default = '关闭',
-        Callback = function(v)
-            toastTarget = v
-        end
-    })
+        local toastTarget = "关闭"
+        local toastTargetDropdown = CounterGroup:AddDropdown('toastTargetSelect', {
+            Text = '弹窗目标',
+            Values = {'关闭'},
+            Default = '关闭',
+            Callback = function(v)
+                toastTarget = v
+            end
+        })
 
-    local function refreshToastTargets()
-        local names = {"关闭"}
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer then
-                local success, isFriend = pcall(function()
-                    return LocalPlayer:IsFriendsWith(player.UserId)
+        local function refreshToastTargets()
+            local names = {"关闭"}
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer then
+                    local success, isFriend = pcall(function()
+                        return LocalPlayer:IsFriendsWith(player.UserId)
+                    end)
+                    if not success or not isFriend then
+                        table.insert(names, player.Name)
+                    end
+                end
+            end
+            if toastTargetDropdown then
+                pcall(function()
+                    if toastTargetDropdown.SetValues then
+                        toastTargetDropdown:SetValues(names)
+                    elseif toastTargetDropdown.SetOptions then
+                        toastTargetDropdown:SetOptions(names)
+                    elseif toastTargetDropdown.Refresh then
+                        toastTargetDropdown:Refresh(names, true)
+                    elseif toastTargetDropdown.Values ~= nil then
+                        toastTargetDropdown.Values = names
+                    end
                 end)
-                if not success or not isFriend then
-                    table.insert(names, player.Name)
-                end
             end
         end
-        if toastTargetDropdown then
-            pcall(function()
-                if toastTargetDropdown.SetValues then
-                    toastTargetDropdown:SetValues(names)
-                elseif toastTargetDropdown.SetOptions then
-                    toastTargetDropdown:SetOptions(names)
-                elseif toastTargetDropdown.Refresh then
-                    toastTargetDropdown:Refresh(names, true)
-                elseif toastTargetDropdown.Values ~= nil then
-                    toastTargetDropdown.Values = names
-                end
-            end)
-        end
-    end
 
-    task.spawn(function()
-        while true do
-            task.wait(0.5)
-            refreshToastTargets()
-        end
-    end)
+        task.spawn(function()
+            while true do
+                task.wait(0.5)
+                refreshToastTargets()
+            end
+        end)
 
-    local toastMsg, toastTime = "", 5
-    CounterGroup:AddInput('toastMsg', {
-        Text = '弹窗内容',
-        Default = '',
-        Callback = function(v) toastMsg = v end
-    })
-    CounterGroup:AddInput('toastTime', {
-        Text = '弹窗时长(秒)',
-        Default = '5',
-        Callback = function(v) toastTime = tonumber(v) or 5 end
-    })
+        local toastMsg, toastTime = "", 5
+        CounterGroup:AddInput('toastMsg', {
+            Text = '弹窗内容',
+            Default = '',
+            Callback = function(v) toastMsg = v end
+        })
+        CounterGroup:AddInput('toastTime', {
+            Text = '弹窗时长(秒)',
+            Default = '5',
+            Callback = function(v) toastTime = tonumber(v) or 5 end
+        })
 
-    CounterGroup:AddButton('发送弹窗', function()
-        if toastTarget == "关闭" then
-            -- 全体发送（除好友外）
-            loadModule("makeToast")(toastMsg, "rainbow", toastTime)
-        else
-            -- 发送给特定玩家
-            local targetPlayer = Players:FindFirstChild(toastTarget)
-            if targetPlayer then
-                -- 尝试通过游戏聊天发送私信
-                local chatService = game:GetService("Chat")
-                if chatService and chatService.Chat then
-                    chatService:Chat("/msg " .. targetPlayer.Name .. " " .. toastMsg)
-                end
-
-                -- 本地提示（作为反馈）
-                Library:Notify({
-                    Text = "已尝试向 " .. targetPlayer.Name .. " 发送弹窗: " .. toastMsg,
-                    Duration = 3,
-                    Icon = "info"
-                })
+        CounterGroup:AddButton('发送弹窗', function()
+            if toastTarget == "关闭" then
+                loadModule("makeToast")(toastMsg, "rainbow", toastTime)
             else
-                Library:Notify({
-                    Text = "目标玩家不存在！",
-                    Duration = 2,
-                    Icon = "warning"
-                })
+                local targetPlayer = Players:FindFirstChild(toastTarget)
+                if targetPlayer then
+                    local chatService = game:GetService("Chat")
+                    if chatService and chatService.Chat then
+                        chatService:Chat("/msg " .. targetPlayer.Name .. " " .. toastMsg)
+                    end
+                    Library:Notify({
+                        Text = "已尝试向 " .. targetPlayer.Name .. " 发送弹窗: " .. toastMsg,
+                        Duration = 3,
+                        Icon = "info"
+                    })
+                else
+                    Library:Notify({
+                        Text = "目标玩家不存在！",
+                        Duration = 2,
+                        Icon = "warning"
+                    })
+                end
             end
-        end
-    end)
+        end)
 
-    CounterGroup:AddButton('通话禁音', function()
-        FireServer("setAirplaneMode", true)
-        LocalPlayer:SetAttribute('isAirplaneMode', true)
-    end)
-    CounterGroup:AddButton('不允许战斗中', function()
-        local combatIndicator = require(ReplicatedStorage.devv.client.Helpers.ui.combatIndicator)
-        hookfunction(combatIndicator.isInCombat, function() return false end)
-        hookfunction(combatIndicator.enterCombat, function() end)
-    end)
-    CounterGroup:AddButton('不允许被抓取', function()
-        local GrabHandler = require(ReplicatedStorage.devv.client.Handlers.GrabHandler)
-        local oldCheck = GrabHandler.CheckValid
-        GrabHandler.CheckValid = function(self, p29, p30)
-            if p29 == LocalPlayer then return false end
-            return oldCheck(self, p29, p30)
-        end
-        local oldGrab = GrabHandler.Grab
-        GrabHandler.Grab = function(self, p55)
-            if p55 == LocalPlayer then return end
-            return oldGrab(self, p55)
-        end
-    end)
-    CounterGroup:AddButton('清除树叶', function()
-        for _, v in workspace:GetDescendants() do
-            if v.Name == "Leaves" and v:IsA("MeshPart") then v:Destroy() end
-        end
-    end)
-    CounterGroup:AddButton('反坐下', function()
-        local function antiSit(char)
-            local hum = char:WaitForChild("Humanoid")
-            hum:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
-            hum:GetPropertyChangedSignal("Sit"):Connect(function()
-                if hum.Sit then hum.Sit = false end
-            end)
-            hum.Sit = false
-        end
-        if LocalPlayer.Character then antiSit(LocalPlayer.Character) end
-        LocalPlayer.CharacterAdded:Connect(antiSit)
-    end)
-    CounterGroup:AddToggle('antiDoll', { Text = '反布娃娃', Default = false, Callback = function(s) AntiDoll = s end })
-    CounterGroup:AddToggle('antiAdmin', { Text = '反管理', Default = false, Callback = function(s) AntiAdmin = s end })
-end
+        CounterGroup:AddButton('通话禁音', function()
+            FireServer("setAirplaneMode", true)
+            LocalPlayer:SetAttribute('isAirplaneMode', true)
+        end)
+        CounterGroup:AddButton('不允许战斗中', function()
+            local combatIndicator = require(ReplicatedStorage.devv.client.Helpers.ui.combatIndicator)
+            hookfunction(combatIndicator.isInCombat, function() return false end)
+            hookfunction(combatIndicator.enterCombat, function() end)
+        end)
+        CounterGroup:AddButton('不允许被抓取', function()
+            local GrabHandler = require(ReplicatedStorage.devv.client.Handlers.GrabHandler)
+            local oldCheck = GrabHandler.CheckValid
+            GrabHandler.CheckValid = function(self, p29, p30)
+                if p29 == LocalPlayer then return false end
+                return oldCheck(self, p29, p30)
+            end
+            local oldGrab = GrabHandler.Grab
+            GrabHandler.Grab = function(self, p55)
+                if p55 == LocalPlayer then return end
+                return oldGrab(self, p55)
+            end
+        end)
+        CounterGroup:AddButton('清除树叶', function()
+            for _, v in workspace:GetDescendants() do
+                if v.Name == "Leaves" and v:IsA("MeshPart") then v:Destroy() end
+            end
+        end)
+        CounterGroup:AddButton('反坐下', function()
+            local function antiSit(char)
+                local hum = char:WaitForChild("Humanoid")
+                hum:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
+                hum:GetPropertyChangedSignal("Sit"):Connect(function()
+                    if hum.Sit then hum.Sit = false end
+                end)
+                hum.Sit = false
+            end
+            if LocalPlayer.Character then antiSit(LocalPlayer.Character) end
+            LocalPlayer.CharacterAdded:Connect(antiSit)
+        end)
+        CounterGroup:AddToggle('antiDoll', { Text = '反布娃娃', Default = false, Callback = function(s) AntiDoll = s end })
+        CounterGroup:AddToggle('antiAdmin', { Text = '反管理', Default = false, Callback = function(s) AntiAdmin = s end })
+    end
 
     do
         local BypassGroup = Tabs.Ohio:AddRightGroupbox('绕过')
@@ -2605,9 +2650,9 @@ function combatTick()
                     busy = true
                     local originalCF = root.CFrame
                     root.CFrame = vestBuyLocation
-                    task.wait(0.1)  -- 原为0.5，改为0.1
+                    task.wait(0.1)
                     InvokeServer("attemptPurchase", "Light Vest")
-                    task.wait(0.1)  -- 原为0.5，改为0.1
+                    task.wait(0.1)
                     refreshItems()
                     root.CFrame = originalCF
                     busy = false
@@ -2632,9 +2677,9 @@ function combatTick()
                         busy = true
                         local originalCF = root.CFrame
                         root.CFrame = bandageBuyLocation
-                        task.wait(0.1)  -- 原为0.5，改为0.1
+                        task.wait(0.1)
                         InvokeServer("attemptPurchase", "Bandage")
-                        task.wait(0.1)  -- 原为0.5，改为0.1
+                        task.wait(0.1)
                         refreshItems()
                         root.CFrame = originalCF
                         busy = false
@@ -2762,6 +2807,19 @@ task.spawn(function()
         if FromBank and not busy then
             busy = true
             pcall(tryBankHeist)
+            busy = false
+        end
+
+        if autoCashRegister and not busy then
+            busy = true
+            pcall(executeCashRegister)
+            busy = false
+        end
+
+        if autoGemRubble and not busy and (tick() - gemRubbleCooldown >= gemRubbleCooldownTime) then
+            busy = true
+            pcall(tryGemRubble)
+            gemRubbleCooldown = tick()
             busy = false
         end
 
