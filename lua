@@ -9,7 +9,7 @@ Library.ShowCustomCursor = true
 Library.NotifySide = "Right"
 
 local Window = Library:CreateWindow({
-    Title = ' Ohio | NOLSAKEN',
+    Title = ' Ohio | Lua',
     Footer = "NOLSAKEN Team",
     Center = true,
     AutoShow = true,
