@@ -256,31 +256,12 @@ local autoGemRubble = false
 local gemRubbleCooldown = 0
 local gemRubbleCooldownTime = 30
 
-local AimbotConfig = {
-    Enabled = false,
-    WallCheck = true,
-    PredictAim = false,
-    PredictValue = 1.5,
-    AimPart = "Head",
-    Radius = 200,
-    AimMode = "Camera"
-}
-local aimConnection = nil
-
-local SETTINGS = {
-    ENABLED = false,
-    TARGET_PART = "Head",
-    HITBOX_SIZE = 15,
-    HITBOX_TRANSPARENCY = 0.7,
-    RAINBOW_TRACE = false,
-}
-local hitboxLoopConnection = nil
-
+local RAINBOW_TRACE = false
 local hitLogEnabled = false
 local hitLogConnection = nil
-local hitLogHealthCache = {}
-local hitLogRecentlyHit = {}
-local hitLogLastCache = {}
+local recentlyHit = {}
+local healthCache = {}
+local hitLogLastNotify = {}
 
 local function fastCollectItems(itemNames)
     local character = LocalPlayer.Character
@@ -395,9 +376,6 @@ local function onCharacterAdded(character)
     end
     if rpgAttackEnabled then
         startRPGAttack()
-    end
-    if SETTINGS.ENABLED then
-        startHitboxLoop()
     end
 end
 if LocalPlayer.Character then
@@ -676,64 +654,8 @@ local function createTrace(targetPos)
     game.Debris:AddItem(part, 1)
 end
 
-local function hasShieldProtection(player)
-    if not player or not player.Character then return false end
-    local humanoid = player.Character:FindFirstChild("Humanoid")
-    if not humanoid then return false end
-    for _, desc in pairs(player.Character:GetDescendants()) do
-        if desc:IsA("ForceField") or desc.Name:lower():find("shield") then
-            return true
-        end
-    end
-    return false
-end
-
-local function getNearestTarget()
-    local nearest = nil
-    local minDist = math.huge
-    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
-
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr == LocalPlayer then continue end
-        local char = plr.Character
-        if not char or not char:FindFirstChild(AimbotConfig.AimPart) or not char:FindFirstChild("Humanoid") then continue end
-        if char.Humanoid.Health <= 0 then continue end
-        if hasShieldProtection(plr) then continue end
-
-        local worldPos = char[AimbotConfig.AimPart].Position
-        local screenPos, onScreen = Camera:WorldToViewportPoint(worldPos)
-
-        local dist
-        if AimbotConfig.AimMode == "Camera" then
-            if not onScreen then continue end
-            dist = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
-            if dist > AimbotConfig.Radius then continue end
-        else
-            dist = (worldPos - Camera.CFrame.Position).Magnitude
-        end
-
-        if AimbotConfig.WallCheck then
-            local rayParams = RaycastParams.new()
-            rayParams.FilterDescendantsInstances = {LocalPlayer.Character}
-            rayParams.FilterType = Enum.RaycastFilterType.Blacklist
-            local ray = workspace:Raycast(Camera.CFrame.Position, worldPos - Camera.CFrame.Position, rayParams)
-            local canSee = ray and ray.Instance and ray.Instance:IsDescendantOf(char)
-            if not canSee then continue end
-        end
-
-        if AimbotConfig.PredictAim then
-            worldPos = worldPos + char[AimbotConfig.AimPart].Velocity * AimbotConfig.PredictValue / 10
-        end
-
-        if dist < minDist then
-            minDist = dist
-            nearest = {Part = char[AimbotConfig.AimPart], WorldPos = worldPos}
-        end
-    end
-    return nearest
-end
-
 local function createRainbowTrace(cf)
+    if not cf then return end
     local startPos = cf.Position
     local targetPos = startPos + (cf.LookVector * 1000)
     local mag = (targetPos - startPos).Magnitude
@@ -754,27 +676,13 @@ local function createRainbowTrace(cf)
     game.Debris:AddItem(P, 1)
 end
 
-local function startHitboxLoop()
-    if hitboxLoopConnection then hitboxLoopConnection:Disconnect() end
-    hitboxLoopConnection = RunService.RenderStepped:Connect(function()
-        if not SETTINGS.ENABLED then return end
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= LocalPlayer and p.Character then
-                local hrp = p.Character:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    hrp.Size = Vector3.new(SETTINGS.HITBOX_SIZE, SETTINGS.HITBOX_SIZE, SETTINGS.HITBOX_SIZE)
-                    hrp.Transparency = SETTINGS.HITBOX_TRANSPARENCY
-                    hrp.Color = Color3.new(1, 0, 0)
-                    hrp.CanCollide = false
-                end
-            end
-        end
-    end)
-end
-
 local function startHitLogger()
     if hitLogConnection then return end
     hitLogEnabled = true
+    recentlyHit = {}
+    healthCache = {}
+    hitLogLastNotify = {}
+
     local mt = getrawmetatable(game)
     setreadonly(mt, false)
     local oldNamecall = mt.__namecall
@@ -784,7 +692,7 @@ local function startHitLogger()
         if method == "FireServer" and hitLogEnabled then
             if args[2] == "player" and args[3] then
                 local hitPlayerId = args[3].hitPlayerId
-                hitLogRecentlyHit[hitPlayerId] = true
+                recentlyHit[hitPlayerId] = true
             end
         end
         return oldNamecall(self, ...)
@@ -797,22 +705,22 @@ local function startHitLogger()
             if p == LocalPlayer or not p.Character then continue end
             local hum = p.Character:FindFirstChildOfClass("Humanoid")
             if not hum then continue end
-            local oldHealth = hitLogHealthCache[p.UserId] or hum.Health
+            local oldHealth = healthCache[p.UserId] or hum.Health
             local newHealth = hum.Health
             local damage = oldHealth - newHealth
-            if damage > 0 and hitLogRecentlyHit[p.UserId] then
-                local key = p.UserId.."|"..damage.."|"..newHealth
-                if not hitLogLastCache[key] then
-                    hitLogLastCache[key] = true
+            if damage > 0 and recentlyHit[p.UserId] then
+                local now = tick()
+                if not hitLogLastNotify[p.UserId] or (now - hitLogLastNotify[p.UserId] > 0.5) then
+                    hitLogLastNotify[p.UserId] = now
                     Library:Notify({
-                        Text = string.format("对%s造成了%.0f伤害 | 剩余血量：%.0f", p.Name, damage, newHealth),
+                        Text = string.format("对 %s 造成了 %.0f 伤害 | 剩余血量：%.0f", p.Name, damage, newHealth),
                         Duration = 2,
                         Icon = "info"
                     })
                 end
-                hitLogRecentlyHit[p.UserId] = nil
+                recentlyHit[p.UserId] = nil
             end
-            hitLogHealthCache[p.UserId] = newHealth
+            healthCache[p.UserId] = newHealth
         end
     end)
 end
@@ -823,9 +731,9 @@ local function stopHitLogger()
         hitLogConnection:Disconnect()
         hitLogConnection = nil
     end
-    hitLogHealthCache = {}
-    hitLogRecentlyHit = {}
-    hitLogLastCache = {}
+    recentlyHit = {}
+    healthCache = {}
+    hitLogLastNotify = {}
 end
 
 local function prepareWeapon()
@@ -999,7 +907,7 @@ local function updateAuraConnection()
     end
 end
 
-local function setupSilentAimAndExtras()
+local function setupSilentAimAndRainbow()
     if not v3item.projectiles then return end
 
     local oldNewProjectile = v3item.projectiles.newProjectileOfType
@@ -1011,37 +919,13 @@ local function setupSilentAimAndExtras()
             end
         end
         local obj = oldNewProjectile(ptype, pdata)
-        if obj and obj.instance then
-            obj.instance.Transparency = 1
-        end
-        if SETTINGS.RAINBOW_TRACE and pdata and pdata.cframe and pdata.Owner == LocalPlayer then
+        if RAINBOW_TRACE and pdata and pdata.cframe and pdata.Owner == LocalPlayer then
             createRainbowTrace(pdata.cframe)
         end
         return obj
     end
-
-    if not v3item.projectiles.oldHitreg then
-        v3item.projectiles.oldHitreg = v3item.projectiles.hitreg
-        v3item.projectiles.hitreg = function(self, hitPart, pos, normal, material)
-            if SETTINGS.ENABLED and self.isPlayerOwned then
-                local target, shortestDist = nil, SETTINGS.HITBOX_SIZE
-                for _, p in ipairs(Players:GetPlayers()) do
-                    local char = p ~= LocalPlayer and p.Character
-                    local head = char and char:FindFirstChild(SETTINGS.TARGET_PART)
-                    if head and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
-                        local dist = (pos - head.Position).Magnitude
-                        if dist < shortestDist then
-                            shortestDist, target = dist, head
-                        end
-                    end
-                end
-                if target then hitPart, pos = target, target.Position end
-            end
-            return v3item.projectiles.oldHitreg(self, hitPart, pos, normal, material)
-        end
-    end
 end
-setupSilentAimAndExtras()
+setupSilentAimAndRainbow()
 
 local function buyMaskIfNeeded()
     if not maskAutoBuy or maskBuying then return end
@@ -2831,110 +2715,11 @@ local function setupUI()
         end)
     end
 
+    -- 杂项标签
     do
         local MiscTab = Tabs.Misc
-
-        local AimGroup = MiscTab:AddLeftGroupbox('自瞄')
-        AimGroup:AddToggle('aimbotToggle', {
-            Text = '开启自瞄',
-            Default = false,
-            Callback = function(s)
-                AimbotConfig.Enabled = s
-                if aimConnection then
-                    aimConnection:Disconnect()
-                    aimConnection = nil
-                end
-                if s then
-                    aimConnection = RunService.RenderStepped:Connect(function()
-                        if not AimbotConfig.Enabled then return end
-                        local tar = getNearestTarget()
-                        if tar and Camera then
-                            Camera.CFrame = CFrame.new(Camera.CFrame.Position, tar.WorldPos)
-                        end
-                    end)
-                end
-            end
-        })
-        AimGroup:AddToggle('aimbotWallCheck', {
-            Text = '墙壁检测',
-            Default = true,
-            Callback = function(v) AimbotConfig.WallCheck = v end
-        })
-        AimGroup:AddToggle('aimbotPredict', {
-            Text = '预判自瞄',
-            Default = false,
-            Callback = function(v) AimbotConfig.PredictAim = v end
-        })
-        AimGroup:AddSlider('aimbotPredictVal', {
-            Text = '预判倍数',
-            Min = 0.1,
-            Max = 5,
-            Default = 1.5,
-            Callback = function(v) AimbotConfig.PredictValue = v end
-        })
-        AimGroup:AddDropdown('aimbotPart', {
-            Text = '瞄准部位',
-            Values = {'头部', '身体'},
-            Default = '头部',
-            Callback = function(v)
-                AimbotConfig.AimPart = v == '头部' and 'Head' or 'UpperTorso'
-            end
-        })
-        AimGroup:AddDropdown('aimbotMode', {
-            Text = '瞄准模式',
-            Values = {'相机瞄准', '最近瞄准'},
-            Default = '相机瞄准',
-            Callback = function(v)
-                AimbotConfig.AimMode = v == '相机瞄准' and 'Camera' or 'Nearest'
-            end
-        })
-
-        AimGroup:AddSlider('aimAssist', {
-            Text = '辅助瞄准灵敏度',
-            Min = 1,
-            Max = 20,
-            Default = 15,
-            Callback = function(v) LocalPlayer:SetAttribute("aimAssistSensitivity", v) end
-        })
-
-        local VisualGroup = MiscTab:AddRightGroupbox('弹道与Hitbox')
-        VisualGroup:AddToggle('rainbowTrace', {
-            Text = '彩虹弹道美化',
-            Default = false,
-            Callback = function(s) SETTINGS.RAINBOW_TRACE = s end
-        })
-        VisualGroup:AddToggle('hitboxEnabled', {
-            Text = 'Hitbox 扩大',
-            Default = false,
-            Callback = function(s)
-                SETTINGS.ENABLED = s
-                if s then
-                    startHitboxLoop()
-                else
-                    if hitboxLoopConnection then
-                        hitboxLoopConnection:Disconnect()
-                        hitboxLoopConnection = nil
-                    end
-                end
-            end
-        })
-        VisualGroup:AddSlider('hitboxSize', {
-            Text = 'Hitbox 大小',
-            Min = 1,
-            Max = 50,
-            Default = 15,
-            Callback = function(v) SETTINGS.HITBOX_SIZE = v end
-        })
-        VisualGroup:AddSlider('hitboxTrans', {
-            Text = 'Hitbox 透明度',
-            Min = 0,
-            Max = 100,
-            Default = 70,
-            Callback = function(v) SETTINGS.HITBOX_TRANSPARENCY = v / 100 end
-        })
-
-        local OtherGroup = MiscTab:AddLeftGroupbox('其他')
-        OtherGroup:AddToggle('hitLogToggle', {
+        local MiscGroup = MiscTab:AddLeftGroupbox('杂项功能')
+        MiscGroup:AddToggle('hitLogToggle', {
             Text = '命中日志',
             Default = false,
             Callback = function(s)
@@ -2943,6 +2728,13 @@ local function setupUI()
                 else
                     stopHitLogger()
                 end
+            end
+        })
+        MiscGroup:AddToggle('rainbowTraceToggle', {
+            Text = '彩虹弹道美化',
+            Default = false,
+            Callback = function(s)
+                RAINBOW_TRACE = s
             end
         })
     end
