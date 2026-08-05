@@ -9,8 +9,8 @@ Library.ShowCustomCursor = true
 Library.NotifySide = "Right"
 
 local Window = Library:CreateWindow({
-    Title = ' Ohio | Lua',
-    Footer = "Lua Team",
+    Title = ' Ohio | NOLSAKEN',
+    Footer = "NOLSAKEN Team",
     Center = true,
     AutoShow = true,
     Resizable = true,
@@ -930,10 +930,20 @@ local function ensureItem(itemName, buyLocation)
     end
     local root = getRoot(LocalPlayer.Character)
     if root then
+        local originalCF = root.CFrame
         root.CFrame = buyLocation
+        local lockConn = RunService.Heartbeat:Connect(function()
+            if root and root.Parent then
+                root.CFrame = buyLocation
+                root.Velocity = Vector3.zero
+                root.RotVelocity = Vector3.zero
+            end
+        end)
         task.wait(0.5)
         InvokeServer("attemptPurchase", itemName)
         task.wait(0.5)
+        if lockConn then lockConn:Disconnect() end
+        root.CFrame = originalCF
     end
     for _, v in pairs(items) do
         if v.name == itemName then return v.guid end
@@ -950,10 +960,19 @@ local function tryGemRubble()
         local root = getRoot(LocalPlayer.Character)
         if not root then return false end
         local originalCF = root.CFrame
-        root.CFrame = grenadeBuyLocation
+        local targetCF = CFrame.new(grenadeBuyLocation.Position + Vector3.new(0, -2, 0))
+        root.CFrame = targetCF
+        local lockConn = RunService.Heartbeat:Connect(function()
+            if root and root.Parent then
+                root.CFrame = targetCF
+                root.Velocity = Vector3.zero
+                root.RotVelocity = Vector3.zero
+            end
+        end)
         task.wait(0.5)
         InvokeServer("attemptPurchase", "TNT")
         task.wait(0.5)
+        if lockConn then lockConn:Disconnect() end
         refreshItems()
         tntGuid = getGuid("TNT")
         root.CFrame = originalCF
@@ -988,7 +1007,8 @@ local function tryBankHeist()
     local cashFolder = bank:FindFirstChild("BankCash") and bank.BankCash:FindFirstChild("Cash")
     if not cashFolder or #cashFolder:GetChildren() == 0 then return false end
 
-    local fragGuid = ensureItem("Frag", grenadeBuyLocation)
+    local adjustedGrenadeLoc = CFrame.new(grenadeBuyLocation.Position + Vector3.new(0, -2, 0))
+    local fragGuid = ensureItem("Frag", adjustedGrenadeLoc)
     if not fragGuid then return false end
 
     local root = getRoot(LocalPlayer.Character)
@@ -1059,7 +1079,9 @@ local function tryBankHeist()
 end
 
 local function runJewelPhase()
-    local cases = workspace:FindFirstChild("GemRobbery"):FindFirstChild("JewelryCases")
+    local gemRobbery = workspace:FindFirstChild("GemRobbery")
+    if not gemRobbery then return false end
+    local cases = gemRobbery:FindFirstChild("JewelryCases")
     if not cases then return false end
 
     local root = getRoot(LocalPlayer.Character)
@@ -1069,7 +1091,10 @@ local function runJewelPhase()
     for _, descendant in pairs(cases:GetDescendants()) do
         if descendant:IsA("ProximityPrompt") and descendant.ActionText == "Steal" and descendant.Enabled then
             descendant.HoldDuration = 0
-            root.CFrame = CFrame.new(descendant.Parent.Position)
+            descendant.RequiresLineOfSight = false
+            local targetPos = descendant.Parent:GetPivot().Position
+            root.CFrame = CFrame.new(targetPos)
+            task.wait(0.1)
             fireproximityprompt(descendant)
 
             if currentMode == "AFK" then
@@ -1139,11 +1164,22 @@ local function runSafePhase()
     if not lockGuid then
         local root = getRoot(LocalPlayer.Character)
         if root then
-            root.CFrame = lockpickBuyLocation
+            local originalCF = root.CFrame
+            local targetCF = CFrame.new(lockpickBuyLocation.Position + Vector3.new(0, -2, 0))
+            root.CFrame = targetCF
+            local lockConn = RunService.Heartbeat:Connect(function()
+                if root and root.Parent then
+                    root.CFrame = targetCF
+                    root.Velocity = Vector3.zero
+                    root.RotVelocity = Vector3.zero
+                end
+            end)
             task.wait(0.5)
             InvokeServer("attemptPurchase", "Lockpick")
             task.wait(0.8)
+            if lockConn then lockConn:Disconnect() end
             refreshItems()
+            root.CFrame = originalCF
         end
         return false
     end
@@ -1186,6 +1222,10 @@ local function runSafePhase()
             end
         end
     end
+    return false
+end
+
+local function runTreasurePhase()
     return false
 end
 
@@ -2702,13 +2742,10 @@ function combatTick()
 
     if remls then
         local garbageItems = {"Topaz", "Emerald Ring", "Topaz Ring", "Amethyst Ring", "Gold Bar", "Emerald"}
-        local keepThrowables = {"Ninja Star", "Tomahawk", "Frag", "Banana Peel"}
+        local keepThrowables = {"Ninja Star", "Tomahawk", "Frag", "Banana Peel", "TNT"}
         for _, v in pairs(items) do
             local shouldRemove = false
             if v.type == "Consumable" and v.subtype == "food" then
-                shouldRemove = true
-            end
-            if v.type == "Melee" then
                 shouldRemove = true
             end
             if v.type == "Throwable" then
