@@ -238,7 +238,6 @@ local autoRewardEnabled = false
 local autoRewardConnection = nil
 
 local autoCollectTruckCash = false
-local autoCollectScrap = false
 local autoSlotMachine = false
 
 local autoStomp = false
@@ -263,57 +262,277 @@ local recentlyHit = {}
 local healthCache = {}
 local hitLogLastNotify = {}
 
-local function fastCollectItems(itemNames)
-    local character = LocalPlayer.Character
-    if not character then return end
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return end
-    local originalPosition = rootPart.CFrame
+local autoCleanEnabled = false
+local treasureFarmEnabled = false
+local autoAirdropEnabled = false
+local autoRentHouseEnabled = false
+local fovConnection = nil
+local autoPickComponentEnabled = false
+local autoWorkEnabled = false
 
-    local targetItems = {}
-    for _, l in pairs(workspace.Game.Entities.ItemPickup:GetChildren()) do
-        for _, v in pairs(l:GetChildren()) do
-            if v:IsA("MeshPart") or v:IsA("Part") then
-                for _, e in pairs(v:GetChildren()) do
-                    if e:IsA("ProximityPrompt") then
-                        for _, itemName in ipairs(itemNames) do
-                            if e.ObjectText == itemName then
-                                table.insert(targetItems, {
-                                    cframe = v.CFrame,
-                                    prompt = e
-                                })
-                                break
+local function startHitLogger()
+    if hitLogConnection then return end
+    hitLogEnabled = true
+    recentlyHit = {}
+    healthCache = {}
+    hitLogLastNotify = {}
+
+    local mt = getrawmetatable(game)
+    setreadonly(mt, false)
+    local oldNamecall = mt.__namecall
+    mt.__namecall = newcclosure(function(self, ...)
+        local args = {...}
+        local method = getnamecallmethod()
+        if method == "FireServer" and hitLogEnabled then
+            if args[2] == "player" and args[3] then
+                local hitPlayerId = args[3].hitPlayerId
+                recentlyHit[hitPlayerId] = true
+            end
+        end
+        return oldNamecall(self, ...)
+    end)
+    setreadonly(mt, true)
+
+    hitLogConnection = RunService.RenderStepped:Connect(function()
+        if not hitLogEnabled then return end
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p == LocalPlayer or not p.Character then continue end
+            local hum = p.Character:FindFirstChildOfClass("Humanoid")
+            if not hum then continue end
+            local oldHealth = healthCache[p.UserId] or hum.Health
+            local newHealth = hum.Health
+            local damage = oldHealth - newHealth
+            if damage > 0 and recentlyHit[p.UserId] then
+                local now = tick()
+                if not hitLogLastNotify[p.UserId] or (now - hitLogLastNotify[p.UserId] > 0.5) then
+                    hitLogLastNotify[p.UserId] = now
+                    Library:Notify({
+                        Text = string.format("对 %s 造成了 %.0f 伤害 | 剩余血量：%.0f", p.Name, damage, newHealth),
+                        Duration = 2,
+                        Icon = "info"
+                    })
+                end
+                recentlyHit[p.UserId] = nil
+            end
+            healthCache[p.UserId] = newHealth
+        end
+    end)
+end
+
+local function stopHitLogger()
+    hitLogEnabled = false
+    if hitLogConnection then
+        hitLogConnection:Disconnect()
+        hitLogConnection = nil
+    end
+    recentlyHit = {}
+    healthCache = {}
+    hitLogLastNotify = {}
+end
+
+local function createRainbowTrace(cf)
+    if not cf then return end
+    local startPos = cf.Position
+    local targetPos = startPos + (cf.LookVector * 1000)
+    local mag = (targetPos - startPos).Magnitude
+    local P = Instance.new("Part")
+    P.Name = "RainbowTrace"
+    P.Anchored = true
+    P.CanCollide = false
+    P.CastShadow = false
+    P.Material = Enum.Material.Neon
+    P.Color = Color3.fromHSV(tick() % 1, 0.8, 1)
+    P.Size = Vector3.new(0.15, 0.15, mag)
+    P.CFrame = CFrame.lookAt(startPos, targetPos) * CFrame.new(0, 0, -mag/2)
+    P.Parent = workspace
+    local s = Instance.new("Sound", P)
+    s.SoundId = "rbxassetid://5633695679"
+    s:Play()
+    TweenService:Create(P, TweenInfo.new(1), {Transparency = 1, Size = Vector3.new(0, 0, mag)}):Play()
+    game.Debris:AddItem(P, 1)
+end
+
+task.spawn(function()
+    while task.wait(0.1) do
+        if autoCleanEnabled then
+            local rubbishFolder = workspace:FindFirstChild("Game") and workspace.Game:FindFirstChild("Local") and workspace.Game.Local:FindFirstChild("Rubbish")
+            if rubbishFolder then
+                for _, v in pairs(rubbishFolder:GetChildren()) do
+                    local guid = v:GetAttribute("guid")
+                    if guid then
+                        Signal.FireServer("cleanRubbish", guid)
+                        v:Destroy()
+                    end
+                end
+            end
+        end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(0.5) do
+        if treasureFarmEnabled then
+            local char = LocalPlayer.Character
+            local root = getRoot(char)
+            if not root then continue end
+            local equippedItem = v3item.inventory.getEquippedItem()
+            if equippedItem and equippedItem.name == "Treasure Map" then
+                local debrisFolder = workspace:FindFirstChild("Game") and workspace.Game:FindFirstChild("Local") and workspace.Game.Local:FindFirstChild("Debris")
+                if debrisFolder then
+                    for _, treasure in pairs(debrisFolder:GetChildren()) do
+                        if treasure.Name == "TreasureMarker" then
+                            local lockConn
+                            lockConn = RunService.Heartbeat:Connect(function()
+                                if root and root.Parent then
+                                    root.CFrame = treasure.CFrame
+                                    root.Velocity = Vector3.zero
+                                    root.RotVelocity = Vector3.zero
+                                end
+                            end)
+                            task.wait(0.1)
+                            local prompt = treasure:FindFirstChild("ProximityPrompt", true)
+                            if prompt then
+                                fireproximityprompt(prompt)
                             end
+                            if lockConn then lockConn:Disconnect() end
+                            task.wait(0.2)
                         end
                     end
                 end
             end
         end
     end
+end)
 
-    if #targetItems == 0 then
-        return false
-    end
-
-    for _, itemData in pairs(targetItems) do
-        if not autoCollectScrap then break end
-        rootPart.CFrame = itemData.cframe * CFrame.new(0, 2, 0)
-        local hum = character:FindFirstChild("Humanoid")
-        if hum then
-            hum:ChangeState(Enum.HumanoidStateType.Jumping)
+task.spawn(function()
+    while task.wait(0.2) do
+        if autoAirdropEnabled then
+            local char = LocalPlayer.Character
+            local root = getRoot(char)
+            if not root then continue end
+            local airdropsFolder = workspace:FindFirstChild("Game") and workspace.Game:FindFirstChild("Airdrops")
+            if airdropsFolder then
+                for _, airdrop in pairs(airdropsFolder:GetChildren()) do
+                    local main = airdrop:FindFirstChild("Airdrop")
+                    if main then
+                        local prompt = main:FindFirstChild("ProximityPrompt")
+                        if prompt then
+                            prompt.RequiresLineOfSight = false
+                            prompt.HoldDuration = 0
+                            local lockConn
+                            lockConn = RunService.Heartbeat:Connect(function()
+                                if root and root.Parent then
+                                    root.CFrame = main.CFrame
+                                    root.Velocity = Vector3.zero
+                                    root.RotVelocity = Vector3.zero
+                                end
+                            end)
+                            task.wait(0.1)
+                            for i = 1, 3 do
+                                fireproximityprompt(prompt)
+                                task.wait(0.02)
+                            end
+                            if lockConn then lockConn:Disconnect() end
+                            break
+                        end
+                    end
+                end
+            end
         end
-        task.wait(2)
-        itemData.prompt.RequiresLineOfSight = false
-        itemData.prompt.HoldDuration = 0
-        for i = 1, 5 do
-            fireproximityprompt(itemData.prompt)
-            task.wait(0.01)
+    end
+end)
+
+task.spawn(function()
+    while task.wait(1) do
+        if autoRentHouseEnabled then
+            pcall(function()
+                local housingPlots = workspace:FindFirstChild("HousingPlots")
+                if housingPlots then
+                    for _, v in pairs(housingPlots:GetChildren()) do
+                        if not v:GetAttribute("Owner") then
+                            Signal.InvokeServer("rentHouse", v)
+                        end
+                    end
+                end
+            end)
         end
     end
+end)
 
-    rootPart.CFrame = originalPosition
-    return true
-end
+task.spawn(function()
+    while task.wait(0.1) do
+        if autoPickComponentEnabled then
+            local char = LocalPlayer.Character
+            local root = getRoot(char)
+            if not root then continue end
+            local itemPickup = workspace:FindFirstChild("Game") and workspace.Game:FindFirstChild("Entities") and workspace.Game.Entities:FindFirstChild("ItemPickup")
+            if not itemPickup then continue end
+            local targetItems = {"Electronics", "Weapon Parts", "Component Box"}
+            for _, folder in pairs(itemPickup:GetChildren()) do
+                for _, part in pairs(folder:GetChildren()) do
+                    if part:IsA("MeshPart") or part:IsA("Part") then
+                        local prompt = part:FindFirstChildOfClass("ProximityPrompt")
+                        if prompt and table.find(targetItems, prompt.ObjectText) then
+                            local targetCF = part.CFrame + Vector3.new(0, 2, 0)
+                            local lockConn
+                            lockConn = RunService.Heartbeat:Connect(function()
+                                if root and root.Parent then
+                                    root.CFrame = targetCF
+                                    root.Velocity = Vector3.zero
+                                    root.RotVelocity = Vector3.zero
+                                end
+                            end)
+                            prompt.RequiresLineOfSight = false
+                            prompt.HoldDuration = 0
+                            task.wait(0.05)
+                            fireproximityprompt(prompt)
+                            if lockConn then lockConn:Disconnect() end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(0.5) do
+        if autoWorkEnabled then
+            local root = getRoot(LocalPlayer.Character)
+            if not root then continue end
+            local targetCF = CFrame.new(1432.93445, 6.09644604, -367.879089)
+            local lockConn
+            lockConn = RunService.Heartbeat:Connect(function()
+                if root and root.Parent then
+                    root.CFrame = targetCF
+                    root.Velocity = Vector3.zero
+                    root.RotVelocity = Vector3.zero
+                end
+            end)
+            local jobPrompt = workspace:FindFirstChild("Jobs") and workspace.Jobs:FindFirstChild("ShoeStore") and workspace.Jobs.ShoeStore:FindFirstChild("Triggers") and workspace.Jobs.ShoeStore.Triggers:FindFirstChild("BeginJobTrigger")
+            if jobPrompt then
+                local prox = jobPrompt:FindFirstChild("ProximityPrompt")
+                if prox then
+                    prox.RequiresLineOfSight = false
+                    prox.HoldDuration = 0
+                    fireproximityprompt(prox)
+                end
+            end
+            local rubbish = workspace:FindFirstChild("Game") and workspace.Game:FindFirstChild("Local") and workspace.Game.Local:FindFirstChild("Rubbish")
+            if rubbish then
+                for _, v in pairs(rubbish:GetChildren()) do
+                    local g = v:GetAttribute("guid")
+                    if g then
+                        Signal.FireServer("cleanRubbish", g)
+                        v:Destroy()
+                    end
+                end
+            end
+            task.wait(0.1)
+            if lockConn then lockConn:Disconnect() end
+        end
+    end
+end)
 
 local function autoClaimRewards()
     for day = 1, 12 do
@@ -652,88 +871,6 @@ local function createTrace(targetPos)
     game.Debris:AddItem(sound, 1)
     TweenService:Create(part, TweenInfo.new(1), {Transparency = 1, Size = Vector3.new(0,0,mag)}):Play()
     game.Debris:AddItem(part, 1)
-end
-
-local function createRainbowTrace(cf)
-    if not cf then return end
-    local startPos = cf.Position
-    local targetPos = startPos + (cf.LookVector * 1000)
-    local mag = (targetPos - startPos).Magnitude
-    local P = Instance.new("Part")
-    P.Name = "RainbowTrace"
-    P.Anchored = true
-    P.CanCollide = false
-    P.CastShadow = false
-    P.Material = Enum.Material.Neon
-    P.Color = Color3.fromHSV(tick() % 1, 0.8, 1)
-    P.Size = Vector3.new(0.15, 0.15, mag)
-    P.CFrame = CFrame.lookAt(startPos, targetPos) * CFrame.new(0, 0, -mag/2)
-    P.Parent = workspace
-    local s = Instance.new("Sound", P)
-    s.SoundId = "rbxassetid://5633695679"
-    s:Play()
-    TweenService:Create(P, TweenInfo.new(1), {Transparency = 1, Size = Vector3.new(0, 0, mag)}):Play()
-    game.Debris:AddItem(P, 1)
-end
-
-local function startHitLogger()
-    if hitLogConnection then return end
-    hitLogEnabled = true
-    recentlyHit = {}
-    healthCache = {}
-    hitLogLastNotify = {}
-
-    local mt = getrawmetatable(game)
-    setreadonly(mt, false)
-    local oldNamecall = mt.__namecall
-    mt.__namecall = newcclosure(function(self, ...)
-        local args = {...}
-        local method = getnamecallmethod()
-        if method == "FireServer" and hitLogEnabled then
-            if args[2] == "player" and args[3] then
-                local hitPlayerId = args[3].hitPlayerId
-                recentlyHit[hitPlayerId] = true
-            end
-        end
-        return oldNamecall(self, ...)
-    end)
-    setreadonly(mt, true)
-
-    hitLogConnection = RunService.RenderStepped:Connect(function()
-        if not hitLogEnabled then return end
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p == LocalPlayer or not p.Character then continue end
-            local hum = p.Character:FindFirstChildOfClass("Humanoid")
-            if not hum then continue end
-            local oldHealth = healthCache[p.UserId] or hum.Health
-            local newHealth = hum.Health
-            local damage = oldHealth - newHealth
-            if damage > 0 and recentlyHit[p.UserId] then
-                local now = tick()
-                if not hitLogLastNotify[p.UserId] or (now - hitLogLastNotify[p.UserId] > 0.5) then
-                    hitLogLastNotify[p.UserId] = now
-                    Library:Notify({
-                        Text = string.format("对 %s 造成了 %.0f 伤害 | 剩余血量：%.0f", p.Name, damage, newHealth),
-                        Duration = 2,
-                        Icon = "info"
-                    })
-                end
-                recentlyHit[p.UserId] = nil
-            end
-            healthCache[p.UserId] = newHealth
-        end
-    end)
-end
-
-local function stopHitLogger()
-    hitLogEnabled = false
-    if hitLogConnection then
-        hitLogConnection:Disconnect()
-        hitLogConnection = nil
-    end
-    recentlyHit = {}
-    healthCache = {}
-    hitLogLastNotify = {}
 end
 
 local function prepareWeapon()
@@ -2003,6 +2140,37 @@ local function setupUI()
     end
 
     do
+        local PlayerGroup3 = Tabs.Player:AddLeftGroupbox('辅助')
+        PlayerGroup3:AddToggle('fovToggle', {
+            Text = '扩大视野',
+            Default = false,
+            Callback = function(v)
+                if v then
+                    fovConnection = RunService.Heartbeat:Connect(function()
+                        workspace.CurrentCamera.FieldOfView = 120
+                    end)
+                else
+                    if fovConnection then
+                        fovConnection:Disconnect()
+                        fovConnection = nil
+                    end
+                end
+            end
+        })
+        PlayerGroup3:AddToggle('fastInteractToggle', {
+            Text = '快速互动',
+            Default = false,
+            Callback = function(state)
+                if state then
+                    game.ProximityPromptService.PromptButtonHoldBegan:Connect(function(prompt)
+                        prompt.HoldDuration = 0
+                    end)
+                end
+            end
+        })
+    end
+
+    do
         local VisualGroup = Tabs.Visual:AddLeftGroupbox('ESP 设置')
         VisualGroup:AddToggle('espMaster', { Text = '开启 ESP', Default = false, Callback = toggleESP })
         VisualGroup:AddToggle('espName', { Text = '显示玩家名', Default = true, Callback = function(s) DrawingConfig.NameEnabled = s end })
@@ -2280,31 +2448,12 @@ local function setupUI()
 
         AutoGroup:AddToggle('autoJewel', { Text = '自动珠宝店', Default = false, Callback = function(s) autozbd = s end })
 
-        AutoGroup:AddToggle('autoCollectScrap', {
-            Text = '自动捡废料',
-            Desc = '传送至废料位置跳跃后等待2秒拾取',
+        AutoGroup:AddToggle('autoPickComponent', {
+            Text = '自动捡材料',
+            Desc = '传送至 Electronics/Weapon Parts/Component Box 位置拾取',
             Default = false,
-            Callback = function(Value)
-                autoCollectScrap = Value
-                if Value then
-                    task.spawn(function()
-                        while autoCollectScrap do
-                            if FromATM or FromBank or autobx or autozbd or autoTreasure or autoblock or automoss or autoxybs or autoxywp or autoptbs or automoney or card then
-                                task.wait(1)
-                                continue
-                            end
-                            busy = true
-                            local success = fastCollectItems({"Electronics", "Weapon Parts"})
-                            if not success then
-                                task.wait(1)
-                            end
-                            busy = false
-                            task.wait(0.1)
-                        end
-                    end)
-                else
-                    busy = false
-                end
+            Callback = function(s)
+                autoPickComponentEnabled = s
             end
         })
 
@@ -2368,7 +2517,15 @@ local function setupUI()
             end
         })
 
-        AutoGroup:AddToggle('autoTreasure', { Text = '自动藏宝图', Default = false, Callback = function(s) autoTreasure = s end })
+        AutoGroup:AddToggle('treasureFarm', {
+            Text = '自动挖海盗宝藏',
+            Desc = '持有藏宝图时自动传送到海盗宝藏标记并挖掘',
+            Default = false,
+            Callback = function(s)
+                treasureFarmEnabled = s
+            end
+        })
+
         AutoGroup:AddToggle('autoSafe', { Text = '自动打开保险', Default = false, Callback = function(s) autobx = s end })
         AutoGroup:AddToggle('unlockAura', {
             Text = '开锁光环',
@@ -2380,6 +2537,42 @@ local function setupUI()
                 else
                     stopUnlockAura()
                 end
+            end
+        })
+
+        AutoGroup:AddToggle('cleanAura', {
+            Text = '打扫光环',
+            Desc = '雇佣工作后自动打扫垃圾',
+            Default = false,
+            Callback = function(s)
+                autoCleanEnabled = s
+            end
+        })
+
+        AutoGroup:AddToggle('autoAirdrop', {
+            Text = '自动领取空投',
+            Desc = '自动传送到空投位置并领取',
+            Default = false,
+            Callback = function(s)
+                autoAirdropEnabled = s
+            end
+        })
+
+        AutoGroup:AddToggle('autoRent', {
+            Text = '自动租房',
+            Desc = '每2秒检测并自动租房',
+            Default = false,
+            Callback = function(s)
+                autoRentHouseEnabled = s
+            end
+        })
+
+        AutoGroup:AddToggle('autoWork', {
+            Text = '自动工作',
+            Desc = '持续传送到鞋店打工并清理垃圾',
+            Default = false,
+            Callback = function(s)
+                autoWorkEnabled = s
             end
         })
 
@@ -2715,7 +2908,6 @@ local function setupUI()
         end)
     end
 
-    -- 杂项标签
     do
         local MiscTab = Tabs.Misc
         local MiscGroup = MiscTab:AddLeftGroupbox('杂项功能')
