@@ -496,11 +496,11 @@ task.spawn(function()
 end)
 
 task.spawn(function()
-    while task.wait(0.5) do
-        if autoWorkEnabled then
+    while task.wait(0.2) do
+        if autoWorkEnabled and not busy then
             local root = getRoot(LocalPlayer.Character)
             if not root then continue end
-            local targetCF = CFrame.new(1432.93445, 6.09644604, -367.879089)
+            local targetCF = CFrame.new(1432.93445, 6.09644604 - 4, -367.879089) * CFrame.Angles(math.rad(90), math.rad(90), 0)
             local lockConn
             lockConn = RunService.Heartbeat:Connect(function()
                 if root and root.Parent then
@@ -1097,7 +1097,7 @@ local function buyMaskIfNeeded()
         while not char:FindFirstChild(maskName) and tick() - startTime < 2 do
             task.wait(0.1)
         end
-        if currentMode == "AFK" then
+        if currentMode == "AFK" and not autoWorkEnabled then
             root.CFrame = getCurrentIdleCF()
         end
     end
@@ -1147,7 +1147,7 @@ local function runATMPhase()
 
     if lockConn then lockConn:Disconnect() end
 
-    if currentMode == "AFK" then
+    if currentMode == "AFK" and not autoWorkEnabled then
         root.CFrame = getCurrentIdleCF()
     else
         root.CFrame = originalCF
@@ -1223,7 +1223,7 @@ local function tryGemRubble()
     task.wait(0.5)
     FireServer("removeItem", tntGuid)
 
-    if currentMode == "AFK" then
+    if currentMode == "AFK" and not autoWorkEnabled then
         root.CFrame = getCurrentIdleCF()
     else
         root.CFrame = originalCF
@@ -1299,7 +1299,7 @@ local function tryBankHeist()
 
     root = getRoot(LocalPlayer.Character)
     if root then
-        if currentMode == "AFK" then
+        if currentMode == "AFK" and not autoWorkEnabled then
             root.CFrame = getCurrentIdleCF()
         else
             root.CFrame = originalCF
@@ -1327,7 +1327,7 @@ local function runJewelPhase()
             task.wait(0.1)
             fireproximityprompt(descendant)
 
-            if currentMode == "AFK" then
+            if currentMode == "AFK" and not autoWorkEnabled then
                 root.CFrame = getCurrentIdleCF()
             else
                 root.CFrame = originalCF
@@ -1440,7 +1440,7 @@ local function runSafePhase()
                             task.wait(3.0)
 
                             if lockConn then lockConn:Disconnect() end
-                            if currentMode == "AFK" then
+                            if currentMode == "AFK" and not autoWorkEnabled then
                                 root.CFrame = getCurrentIdleCF()
                             else
                                 root.CFrame = originalCF
@@ -1583,7 +1583,7 @@ end
 
 local function updateIdleConnection()
     if idleConnection then idleConnection:Disconnect(); idleConnection = nil end
-    if currentMode == "AFK" then
+    if currentMode == "AFK" and not autoWorkEnabled then
         local targetCF = getCurrentIdleCF()
         idleConnection = RunService.Heartbeat:Connect(function()
             if not busy and not maskBuying then
@@ -1824,6 +1824,7 @@ local function performCrafting()
 end
 
 local function storeGems()
+    if busy then return end
     local housingPlots = workspace:FindFirstChild("HousingPlots")
     if not housingPlots then return end
     local items = v3item.inventory.items
@@ -2573,6 +2574,7 @@ local function setupUI()
             Default = false,
             Callback = function(s)
                 autoWorkEnabled = s
+                updateIdleConnection()
             end
         })
 
@@ -2642,6 +2644,79 @@ local function setupUI()
                 autoStoreGems = s
             end
         })
+
+        AutoGroup:AddButton('传回家存储宝石', function()
+            task.spawn(function()
+                local function hasValuableGems()
+                    for _, item in pairs(items) do
+                        if item.name == "Diamond" or item.name == "Rollie" or item.name == "Dark Matter Gem" or
+                           item.name == "Diamond Ring" or item.name == "Void Gem" then
+                            return true
+                        end
+                    end
+                    return false
+                end
+                if not hasValuableGems() then
+                    Library:Notify({Text = "背包中没有珍贵宝石", Duration = 2, Icon = "warning"})
+                    return
+                end
+
+                local root = getRoot(LocalPlayer.Character)
+                if not root then return end
+                local originalCF = root.CFrame
+                local homePlot = nil
+                local housingPlots = workspace:FindFirstChild("HousingPlots")
+                if housingPlots then
+                    for _, plot in pairs(housingPlots:GetChildren()) do
+                        if plot:GetAttribute("Owner") == LocalPlayer.UserId then
+                            homePlot = plot
+                            break
+                        end
+                    end
+                end
+                if not homePlot then
+                    Library:Notify({Text = "未找到您的房屋", Duration = 3, Icon = "warning"})
+                    return
+                end
+                local doorPart = homePlot:FindFirstChild("Main") or homePlot:FindFirstChild("Door") or homePlot:FindFirstChildWhichIsA("BasePart")
+                if not doorPart then
+                    Library:Notify({Text = "无法定位房屋入口", Duration = 3, Icon = "warning"})
+                    return
+                end
+
+                root.CFrame = doorPart.CFrame * CFrame.new(0, 2, 0)
+                task.wait(0.5)
+
+                local startTime = tick()
+                local failCount = 0
+                local maxFail = 3
+                while tick() - startTime < 8 do
+                    if not hasValuableGems() then
+                        break
+                    end
+                    if not busy then
+                        storeGems()
+                    end
+                    task.wait(0.5)
+                    if not hasValuableGems() then
+                        failCount = 0
+                        break
+                    else
+                        failCount = failCount + 1
+                        if failCount >= maxFail then
+                            break
+                        end
+                    end
+                end
+
+                if currentMode == "AFK" and not autoWorkEnabled then
+                    root.CFrame = getCurrentIdleCF()
+                else
+                    root.CFrame = originalCF
+                end
+                Library:Notify({Text = "宝石存储任务结束", Duration = 2, Icon = "check"})
+            end)
+        end)
 
         AutoGroup:AddToggle('autoReward', {
             Text = '自动领取奖励',
@@ -3138,7 +3213,7 @@ RunService.Heartbeat:Connect(function()
     if autoCraftEnabled or autoClaimEnabled then
         performCrafting()
     end
-    if autoStoreGems then
+    if autoStoreGems and not busy then
         storeGems()
     end
 end)
