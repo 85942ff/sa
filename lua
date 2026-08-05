@@ -269,6 +269,7 @@ local autoRentHouseEnabled = false
 local fovConnection = nil
 local autoPickComponentEnabled = false
 local autoWorkEnabled = false
+local autoTeleportStoreGemsEnabled = false
 
 local function startHitLogger()
     if hitLogConnection then return end
@@ -500,7 +501,7 @@ task.spawn(function()
         if autoWorkEnabled and not busy then
             local root = getRoot(LocalPlayer.Character)
             if not root then continue end
-            local targetCF = CFrame.new(1432.93445, 6.09644604 - 4, -367.879089) * CFrame.Angles(math.rad(90), math.rad(90), 0)
+            local targetCF = CFrame.new(1432.93445, 6.09644604 - 4, -367.879089) * CFrame.Angles(math.rad(90), 0, math.rad(90))
             local lockConn
             lockConn = RunService.Heartbeat:Connect(function()
                 if root and root.Parent then
@@ -530,6 +531,72 @@ task.spawn(function()
             end
             task.wait(0.1)
             if lockConn then lockConn:Disconnect() end
+        end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(3) do
+        if autoTeleportStoreGemsEnabled and not busy then
+            local function hasValuableGems()
+                for _, item in pairs(items) do
+                    if item.name == "Diamond" or item.name == "Rollie" or item.name == "Dark Matter Gem" or
+                       item.name == "Diamond Ring" or item.name == "Void Gem" then
+                        return true
+                    end
+                end
+                return false
+            end
+            if not hasValuableGems() then continue end
+
+            local root = getRoot(LocalPlayer.Character)
+            if not root then continue end
+            local originalCF = root.CFrame
+            local homePlot = nil
+            local housingPlots = workspace:FindFirstChild("HousingPlots")
+            if housingPlots then
+                for _, plot in pairs(housingPlots:GetChildren()) do
+                    if plot:GetAttribute("Owner") == LocalPlayer.UserId then
+                        homePlot = plot
+                        break
+                    end
+                end
+            end
+            if not homePlot then continue end
+            local doorPart = homePlot:FindFirstChild("Main") or homePlot:FindFirstChild("Door") or homePlot:FindFirstChildWhichIsA("BasePart")
+            if not doorPart then continue end
+
+            root.CFrame = doorPart.CFrame * CFrame.new(0, 2, 0)
+            task.wait(0.5)
+
+            local startTime = tick()
+            local failCount = 0
+            local maxFail = 3
+            while tick() - startTime < 8 do
+                if not hasValuableGems() then
+                    failCount = 0
+                    break
+                end
+                if not busy then
+                    storeGems()
+                end
+                task.wait(0.5)
+                if not hasValuableGems() then
+                    failCount = 0
+                    break
+                else
+                    failCount = failCount + 1
+                    if failCount >= maxFail then
+                        break
+                    end
+                end
+            end
+
+            if currentMode == "AFK" and not autoWorkEnabled then
+                root.CFrame = getCurrentIdleCF()
+            else
+                root.CFrame = originalCF
+            end
         end
     end
 end)
@@ -2578,6 +2645,15 @@ local function setupUI()
             end
         })
 
+        AutoGroup:AddToggle('autoTeleportStoreGems', {
+            Text = '自动传回家存宝石',
+            Desc = '有珍贵宝石时自动传回家存储',
+            Default = false,
+            Callback = function(s)
+                autoTeleportStoreGemsEnabled = s
+            end
+        })
+
         AutoGroup:AddToggle('cashAura', { Text = '现金光环', Default = false, Callback = function(s)
             cashAuraEnabled = s
             if s then startCashAura() else stopCashAura() end
@@ -2644,79 +2720,6 @@ local function setupUI()
                 autoStoreGems = s
             end
         })
-
-        AutoGroup:AddButton('传回家存储宝石', function()
-            task.spawn(function()
-                local function hasValuableGems()
-                    for _, item in pairs(items) do
-                        if item.name == "Diamond" or item.name == "Rollie" or item.name == "Dark Matter Gem" or
-                           item.name == "Diamond Ring" or item.name == "Void Gem" then
-                            return true
-                        end
-                    end
-                    return false
-                end
-                if not hasValuableGems() then
-                    Library:Notify({Text = "背包中没有珍贵宝石", Duration = 2, Icon = "warning"})
-                    return
-                end
-
-                local root = getRoot(LocalPlayer.Character)
-                if not root then return end
-                local originalCF = root.CFrame
-                local homePlot = nil
-                local housingPlots = workspace:FindFirstChild("HousingPlots")
-                if housingPlots then
-                    for _, plot in pairs(housingPlots:GetChildren()) do
-                        if plot:GetAttribute("Owner") == LocalPlayer.UserId then
-                            homePlot = plot
-                            break
-                        end
-                    end
-                end
-                if not homePlot then
-                    Library:Notify({Text = "未找到您的房屋", Duration = 3, Icon = "warning"})
-                    return
-                end
-                local doorPart = homePlot:FindFirstChild("Main") or homePlot:FindFirstChild("Door") or homePlot:FindFirstChildWhichIsA("BasePart")
-                if not doorPart then
-                    Library:Notify({Text = "无法定位房屋入口", Duration = 3, Icon = "warning"})
-                    return
-                end
-
-                root.CFrame = doorPart.CFrame * CFrame.new(0, 2, 0)
-                task.wait(0.5)
-
-                local startTime = tick()
-                local failCount = 0
-                local maxFail = 3
-                while tick() - startTime < 8 do
-                    if not hasValuableGems() then
-                        break
-                    end
-                    if not busy then
-                        storeGems()
-                    end
-                    task.wait(0.5)
-                    if not hasValuableGems() then
-                        failCount = 0
-                        break
-                    else
-                        failCount = failCount + 1
-                        if failCount >= maxFail then
-                            break
-                        end
-                    end
-                end
-
-                if currentMode == "AFK" and not autoWorkEnabled then
-                    root.CFrame = getCurrentIdleCF()
-                else
-                    root.CFrame = originalCF
-                end
-                Library:Notify({Text = "宝石存储任务结束", Duration = 2, Icon = "check"})
-            end)
-        end)
 
         AutoGroup:AddToggle('autoReward', {
             Text = '自动领取奖励',
