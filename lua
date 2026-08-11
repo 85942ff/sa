@@ -255,6 +255,13 @@ local autoGemRubble = false
 local gemRubbleCooldown = 0
 local gemRubbleCooldownTime = 30
 
+local RAINBOW_TRACE = false
+local hitLogEnabled = false
+local hitLogConnection = nil
+local recentlyHit = {}
+local healthCache = {}
+local hitLogLastNotify = {}
+
 local autoCleanEnabled = false
 local treasureFarmEnabled = false
 local autoAirdropEnabled = false
@@ -263,6 +270,60 @@ local fovConnection = nil
 local autoPickComponentEnabled = false
 local autoWorkEnabled = false
 local autoTeleportStoreGemsEnabled = false
+
+local function startHitLoggerV2()
+    if hitLogConnection then return end
+    healthCache = {}
+    recentlyHit = {}
+    hitLogLastNotify = {}
+    local mt = getrawmetatable(game)
+    setreadonly(mt, false)
+    local oldNamecall = mt.__namecall
+    mt.__namecall = newcclosure(function(self, ...)
+        local args = {...}
+        local method = getnamecallmethod()
+        if method == "FireServer" and args[2] == "player" and args[3] then
+            local hitPlayerId = args[3].hitPlayerId
+            recentlyHit[hitPlayerId] = true
+        end
+        return oldNamecall(self, ...)
+    end)
+    setreadonly(mt, true)
+    hitLogConnection = RunService.RenderStepped:Connect(function()
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p == LocalPlayer or not p.Character then continue end
+            local hum = p.Character:FindFirstChildOfClass("Humanoid")
+            if not hum then continue end
+            local oldHealth = healthCache[p.UserId] or hum.Health
+            local newHealth = hum.Health
+            local damage = oldHealth - newHealth
+            if damage > 0 and recentlyHit[p.UserId] then
+                local now = tick()
+                if not hitLogLastNotify[p.UserId] or now - hitLogLastNotify[p.UserId] > 3 then
+                    hitLogLastNotify[p.UserId] = now
+                    local text = string.format("对 %s 造成了 %.0f 伤害 | 剩余血量：%.0f", p.Name, damage, newHealth)
+                    Library:Notify({
+                        Text = text,
+                        Duration = 3,
+                        Icon = "crosshair"
+                    })
+                end
+                recentlyHit[p.UserId] = nil
+            end
+            healthCache[p.UserId] = newHealth
+        end
+    end)
+end
+
+local function stopHitLoggerV2()
+    if hitLogConnection then
+        hitLogConnection:Disconnect()
+        hitLogConnection = nil
+    end
+    healthCache = {}
+    recentlyHit = {}
+    hitLogLastNotify = {}
+end
 
 local function hasShieldProtection(player)
     if player and player.Character then
@@ -273,6 +334,28 @@ local function hasShieldProtection(player)
         end
     end
     return false
+end
+
+local function createRainbowTrace(cf)
+    if not cf then return end
+    local startPos = cf.Position
+    local targetPos = startPos + (cf.LookVector * 1000)
+    local mag = (targetPos - startPos).Magnitude
+    local P = Instance.new("Part")
+    P.Name = "RainbowTrace"
+    P.Anchored = true
+    P.CanCollide = false
+    P.CastShadow = false
+    P.Material = Enum.Material.Neon
+    P.Color = Color3.fromHSV(tick() % 1, 0.8, 1)
+    P.Size = Vector3.new(0.15, 0.15, mag)
+    P.CFrame = CFrame.lookAt(startPos, targetPos) * CFrame.new(0, 0, -mag/2)
+    P.Parent = workspace
+    local s = Instance.new("Sound", P)
+    s.SoundId = "rbxassetid://5633695679"
+    s:Play()
+    TweenService:Create(P, TweenInfo.new(1), {Transparency = 1, Size = Vector3.new(0, 0, mag)}):Play()
+    game.Debris:AddItem(P, 1)
 end
 
 task.spawn(function()
@@ -1054,7 +1137,11 @@ local function setupSilentAimAndRainbow()
                 pdata.cframe = CFrame.lookAt(pdata.cframe.Position, target.Position)
             end
         end
-        return oldNewProjectile(ptype, pdata)
+        local obj = oldNewProjectile(ptype, pdata)
+        if RAINBOW_TRACE and pdata and pdata.cframe and pdata.Owner == LocalPlayer then
+            createRainbowTrace(pdata.cframe)
+        end
+        return obj
     end
 end
 setupSilentAimAndRainbow()
@@ -3079,7 +3166,4 @@ task.spawn(function()
         end
         task.wait(0.5)
     end
-end)
-
-Library:OnUnload(function()
 end)
