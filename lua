@@ -1,5 +1,4 @@
 local repo = 'https://raw.githubusercontent.com/deividcomsono/Obsidian/main/'
-
 local Library = loadstring(game:HttpGet(repo .. 'Library.lua'))()
 local ThemeManager = loadstring(game:HttpGet(repo .. 'addons/ThemeManager.lua'))()
 local SaveManager = loadstring(game:HttpGet(repo .. 'addons/SaveManager.lua'))()
@@ -239,6 +238,7 @@ local autoRewardEnabled = false
 local autoRewardConnection = nil
 
 local autoCollectTruckCash = false
+local autoCollectScrap = false
 local autoSlotMachine = false
 
 local autoStomp = false
@@ -256,411 +256,57 @@ local autoGemRubble = false
 local gemRubbleCooldown = 0
 local gemRubbleCooldownTime = 30
 
-local autoCleanEnabled = false
-local treasureFarmEnabled = false
-local autoAirdropEnabled = false
-local autoRentHouseEnabled = false
-local fovConnection = nil
-local autoPickComponentEnabled = false
-local autoWorkEnabled = false
-local autoTeleportStoreGemsEnabled = false
+local function fastCollectItems(itemNames)
+    local character = LocalPlayer.Character
+    if not character then return end
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    local originalPosition = rootPart.CFrame
 
-local bulletTraceEnabled = false
-local bulletTraceTarget = nil
-local bulletTraceFovColor = Color3.fromRGB(54, 57, 241)
-local bulletTraceFovRadius = 130
-local bulletTraceMaxDist = 2000
-local oldNamecallHook = nil
-
-local function createBulletTraceFOV()
-    if fovGui then fovGui:Destroy() end
-    local fovGui = Instance.new("ScreenGui")
-    fovGui.Name = "BulletTraceFOV"
-    fovGui.ResetOnSpawn = false
-    fovGui.IgnoreGuiInset = true
-    fovGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    fovGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-    local frame = Instance.new("Frame", fovGui)
-    frame.Name = "FOVFrame"
-    frame.AnchorPoint = Vector2.new(0.5, 0.5)
-    frame.Position = UDim2.fromScale(0.5, 0.5)
-    frame.Size = UDim2.fromOffset(bulletTraceFovRadius * 2, bulletTraceFovRadius * 2)
-    frame.BackgroundTransparency = 1
-    local stroke = Instance.new("UIStroke", frame)
-    stroke.Name = "Stroke"
-    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    stroke.Thickness = 1
-    stroke.Transparency = 0.5
-    stroke.Color = bulletTraceFovColor
-    local corner = Instance.new("UICorner", frame)
-    corner.CornerRadius = UDim.new(1, 0)
-    return fovGui
-end
-
-local fovGui = createBulletTraceFOV()
-fovGui.Enabled = false
-
-local function getBulletTraceTarget()
-    local myChar = LocalPlayer.Character
-    if not myChar then return nil end
-    local myPos = myChar:GetPivot().Position
-    local nearestDist = bulletTraceMaxDist
-    local nearestPart = nil
-    for _, player in ipairs(Players:GetPlayers()) do
-        if not shouldAttackPlayer(player, #targetPlayers == 0) then continue end
-        local char = player.Character
-        if not char then continue end
-        local head = char:FindFirstChild("Head")
-        if not head then continue end
-        local dist = (myPos - head.Position).Magnitude
-        if dist < nearestDist then
-            nearestDist = dist
-            nearestPart = head
-        end
-    end
-    return nearestPart
-end
-
-local function updateBulletTraceFOV()
-    if fovGui then
-        fovGui.Enabled = bulletTraceEnabled
-    end
-end
-
-local function setupBulletTraceHook()
-    if oldNamecallHook then return end
-    oldNamecallHook = hookmetamethod(game, "__namecall", newcclosure(function(...)
-        local self = ...
-        local method = getnamecallmethod()
-        local args = {...}
-        if not bulletTraceEnabled or checkcaller() then
-            return oldNamecallHook(...)
-        end
-        if method == "Raycast" and self == workspace then
-            local target = bulletTraceTarget
-            if target then
-                local origin = args[2]
-                local direction = (target.Position - origin)
-                local distance = direction.Magnitude
-                if distance > 0 then
-                    args[3] = direction / distance * distance
-                end
-                local params = args[4]
-                if typeof(params) == "RaycastParams" then
-                    params.FilterType = Enum.RaycastFilterType.Include
-                    params.FilterDescendantsInstances = {target.Parent}
-                else
-                    params = RaycastParams.new()
-                    params.FilterType = Enum.RaycastFilterType.Include
-                    params.FilterDescendantsInstances = {target.Parent}
-                    args[4] = params
-                end
-            end
-        end
-        return oldNamecallHook(unpack(args))
-    end))
-end
-
-local function removeBulletTraceHook()
-    if oldNamecallHook then
-        hookmetamethod(game, "__namecall", oldNamecallHook)
-        oldNamecallHook = nil
-    end
-end
-
-local bulletTraceUpdateConn
-local function startBulletTraceUpdate()
-    if bulletTraceUpdateConn then bulletTraceUpdateConn:Disconnect() end
-    bulletTraceUpdateConn = RunService.Heartbeat:Connect(function()
-        if bulletTraceEnabled then
-            bulletTraceTarget = getBulletTraceTarget()
-        end
-    end)
-end
-
-local function setBulletTraceEnabled(state)
-    bulletTraceEnabled = state
-    if state then
-        updateBulletTraceFOV()
-        setupBulletTraceHook()
-        startBulletTraceUpdate()
-    else
-        bulletTraceTarget = nil
-        updateBulletTraceFOV()
-        if bulletTraceUpdateConn then
-            bulletTraceUpdateConn:Disconnect()
-            bulletTraceUpdateConn = nil
-        end
-    end
-end
-
-local function updateFovAppearance()
-    if fovGui then
-        local frame = fovGui:FindFirstChild("FOVFrame")
-        if frame then
-            frame.Size = UDim2.fromOffset(bulletTraceFovRadius * 2, bulletTraceFovRadius * 2)
-            local stroke = frame:FindFirstChild("Stroke")
-            if stroke then
-                stroke.Color = bulletTraceFovColor
-            end
-        end
-    end
-end
-
-local function hasShieldProtection(player)
-    if player and player.Character then
-        for _, desc in pairs(player.Character:GetDescendants()) do
-            if desc:IsA("ForceField") or desc.Name:lower():find("shield") or desc.Name:lower():find("保护") then
-                return true
-            end
-        end
-    end
-    return false
-end
-
-task.spawn(function()
-    while task.wait(0.1) do
-        if autoCleanEnabled then
-            local rubbishFolder = workspace:FindFirstChild("Game") and workspace.Game:FindFirstChild("Local") and workspace.Game.Local:FindFirstChild("Rubbish")
-            if rubbishFolder then
-                for _, v in pairs(rubbishFolder:GetChildren()) do
-                    local guid = v:GetAttribute("guid")
-                    if guid then
-                        Signal.FireServer("cleanRubbish", guid)
-                        v:Destroy()
-                    end
-                end
-            end
-        end
-    end
-end)
-
-task.spawn(function()
-    while task.wait(0.5) do
-        if treasureFarmEnabled then
-            local char = LocalPlayer.Character
-            local root = getRoot(char)
-            if not root then continue end
-            local equippedItem = v3item.inventory.getEquippedItem()
-            if equippedItem and equippedItem.name == "Treasure Map" then
-                local debrisFolder = workspace:FindFirstChild("Game") and workspace.Game:FindFirstChild("Local") and workspace.Game.Local:FindFirstChild("Debris")
-                if debrisFolder then
-                    for _, treasure in pairs(debrisFolder:GetChildren()) do
-                        if treasure.Name == "TreasureMarker" then
-                            local lockConn
-                            lockConn = RunService.Heartbeat:Connect(function()
-                                if root and root.Parent then
-                                    root.CFrame = treasure.CFrame
-                                    root.Velocity = Vector3.zero
-                                    root.RotVelocity = Vector3.zero
-                                end
-                            end)
-                            task.wait(0.1)
-                            local prompt = treasure:FindFirstChild("ProximityPrompt", true)
-                            if prompt then
-                                fireproximityprompt(prompt)
+    local targetItems = {}
+    for _, l in pairs(workspace.Game.Entities.ItemPickup:GetChildren()) do
+        for _, v in pairs(l:GetChildren()) do
+            if v:IsA("MeshPart") or v:IsA("Part") then
+                for _, e in pairs(v:GetChildren()) do
+                    if e:IsA("ProximityPrompt") then
+                        for _, itemName in ipairs(itemNames) do
+                            if e.ObjectText == itemName then
+                                table.insert(targetItems, {
+                                    cframe = v.CFrame,
+                                    prompt = e
+                                })
+                                break
                             end
-                            if lockConn then lockConn:Disconnect() end
-                            task.wait(0.2)
                         end
                     end
                 end
             end
         end
     end
-end)
 
-task.spawn(function()
-    while task.wait(0.2) do
-        if autoAirdropEnabled then
-            local char = LocalPlayer.Character
-            local root = getRoot(char)
-            if not root then continue end
-            local airdropsFolder = workspace:FindFirstChild("Game") and workspace.Game:FindFirstChild("Airdrops")
-            if airdropsFolder then
-                for _, airdrop in pairs(airdropsFolder:GetChildren()) do
-                    local main = airdrop:FindFirstChild("Airdrop")
-                    if main then
-                        local prompt = main:FindFirstChild("ProximityPrompt")
-                        if prompt then
-                            prompt.RequiresLineOfSight = false
-                            prompt.HoldDuration = 0
-                            local lockConn
-                            lockConn = RunService.Heartbeat:Connect(function()
-                                if root and root.Parent then
-                                    root.CFrame = main.CFrame
-                                    root.Velocity = Vector3.zero
-                                    root.RotVelocity = Vector3.zero
-                                end
-                            end)
-                            task.wait(0.1)
-                            for i = 1, 3 do
-                                fireproximityprompt(prompt)
-                                task.wait(0.02)
-                            end
-                            if lockConn then lockConn:Disconnect() end
-                            break
-                        end
-                    end
-                end
-            end
+    if #targetItems == 0 then
+        return false
+    end
+
+    for _, itemData in pairs(targetItems) do
+        if not autoCollectScrap then break end
+        rootPart.CFrame = itemData.cframe * CFrame.new(0, 2, 0)
+        local hum = character:FindFirstChild("Humanoid")
+        if hum then
+            hum:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+        task.wait(2)
+        itemData.prompt.RequiresLineOfSight = false
+        itemData.prompt.HoldDuration = 0
+        for i = 1, 5 do
+            fireproximityprompt(itemData.prompt)
+            task.wait(0.01)
         end
     end
-end)
 
-task.spawn(function()
-    while task.wait(1) do
-        if autoRentHouseEnabled then
-            pcall(function()
-                local housingPlots = workspace:FindFirstChild("HousingPlots")
-                if housingPlots then
-                    for _, v in pairs(housingPlots:GetChildren()) do
-                        if not v:GetAttribute("Owner") then
-                            Signal.InvokeServer("rentHouse", v)
-                        end
-                    end
-                end
-            end)
-        end
-    end
-end)
-
-task.spawn(function()
-    while task.wait(0.1) do
-        if autoPickComponentEnabled then
-            local char = LocalPlayer.Character
-            local root = getRoot(char)
-            if not root then continue end
-            local itemPickup = workspace:FindFirstChild("Game") and workspace.Game:FindFirstChild("Entities") and workspace.Game.Entities:FindFirstChild("ItemPickup")
-            if not itemPickup then continue end
-            local targetItems = {"Electronics", "Weapon Parts", "Component Box"}
-            for _, folder in pairs(itemPickup:GetChildren()) do
-                for _, part in pairs(folder:GetChildren()) do
-                    if part:IsA("MeshPart") or part:IsA("Part") then
-                        local prompt = part:FindFirstChildOfClass("ProximityPrompt")
-                        if prompt and table.find(targetItems, prompt.ObjectText) then
-                            local targetCF = part.CFrame + Vector3.new(0, 2, 0)
-                            local lockConn
-                            lockConn = RunService.Heartbeat:Connect(function()
-                                if root and root.Parent then
-                                    root.CFrame = targetCF
-                                    root.Velocity = Vector3.zero
-                                    root.RotVelocity = Vector3.zero
-                                end
-                            end)
-                            prompt.RequiresLineOfSight = false
-                            prompt.HoldDuration = 0
-                            task.wait(0.05)
-                            fireproximityprompt(prompt)
-                            if lockConn then lockConn:Disconnect() end
-                        end
-                    end
-                end
-            end
-        end
-    end
-end)
-
-task.spawn(function()
-    while task.wait(0.2) do
-        if autoWorkEnabled and not busy then
-            local root = getRoot(LocalPlayer.Character)
-            if not root then continue end
-            local targetCF = CFrame.new(1432.93445, 6.09644604 - 4, -367.879089) * CFrame.Angles(math.rad(90), 0, math.rad(90))
-            local lockConn
-            lockConn = RunService.Heartbeat:Connect(function()
-                if root and root.Parent then
-                    root.CFrame = targetCF
-                    root.Velocity = Vector3.zero
-                    root.RotVelocity = Vector3.zero
-                end
-            end)
-            local jobPrompt = workspace:FindFirstChild("Jobs") and workspace.Jobs:FindFirstChild("ShoeStore") and workspace.Jobs.ShoeStore:FindFirstChild("Triggers") and workspace.Jobs.ShoeStore.Triggers:FindFirstChild("BeginJobTrigger")
-            if jobPrompt then
-                local prox = jobPrompt:FindFirstChild("ProximityPrompt")
-                if prox then
-                    prox.RequiresLineOfSight = false
-                    prox.HoldDuration = 0
-                    fireproximityprompt(prox)
-                end
-            end
-            local rubbish = workspace:FindFirstChild("Game") and workspace.Game:FindFirstChild("Local") and workspace.Game.Local:FindFirstChild("Rubbish")
-            if rubbish then
-                for _, v in pairs(rubbish:GetChildren()) do
-                    local g = v:GetAttribute("guid")
-                    if g then
-                        Signal.FireServer("cleanRubbish", g)
-                        v:Destroy()
-                    end
-                end
-            end
-            task.wait(0.1)
-            if lockConn then lockConn:Disconnect() end
-        end
-    end
-end)
-
-task.spawn(function()
-    while task.wait(3) do
-        if autoTeleportStoreGemsEnabled and not busy then
-            local function hasValuableGems()
-                for _, item in pairs(items) do
-                    if item.name == "Diamond" or item.name == "Rollie" or item.name == "Dark Matter Gem" or
-                       item.name == "Diamond Ring" or item.name == "Void Gem" then
-                        return true
-                    end
-                end
-                return false
-            end
-            if not hasValuableGems() then continue end
-            local root = getRoot(LocalPlayer.Character)
-            if not root then continue end
-            local originalCF = root.CFrame
-            local homePlot = nil
-            local housingPlots = workspace:FindFirstChild("HousingPlots")
-            if housingPlots then
-                for _, plot in pairs(housingPlots:GetChildren()) do
-                    if plot:GetAttribute("Owner") == LocalPlayer.UserId then
-                        homePlot = plot
-                        break
-                    end
-                end
-            end
-            if not homePlot then continue end
-            local doorPart = homePlot:FindFirstChild("Main") or homePlot:FindFirstChild("Door") or homePlot:FindFirstChildWhichIsA("BasePart")
-            if not doorPart then continue end
-            root.CFrame = doorPart.CFrame * CFrame.new(0, 2, 0)
-            task.wait(0.5)
-            local startTime = tick()
-            local failCount = 0
-            local maxFail = 3
-            while tick() - startTime < 8 do
-                if not hasValuableGems() then
-                    failCount = 0
-                    break
-                end
-                if not busy then
-                    storeGems()
-                end
-                task.wait(0.5)
-                if not hasValuableGems() then
-                    failCount = 0
-                    break
-                else
-                    failCount = failCount + 1
-                    if failCount >= maxFail then
-                        break
-                    end
-                end
-            end
-            if currentMode == "AFK" and not autoWorkEnabled then
-                root.CFrame = getCurrentIdleCF()
-            else
-                root.CFrame = originalCF
-            end
-        end
-    end
-end)
+    rootPart.CFrame = originalPosition
+    return true
+end
 
 local function autoClaimRewards()
     for day = 1, 12 do
@@ -713,6 +359,7 @@ local function onCharacterAdded(character)
         if flying then startFly() end
     end)
     maskBuying = false
+
     task.wait(0.5)
     if aurablade then
         prepareWeapon()
@@ -1003,11 +650,10 @@ end
 local function prepareWeapon()
     if selectedWeapon == "Gun Kill" then
         local hasGun = false
-        local gunGuid = nil
         for _, v in pairs(items) do
             if v.name == selectedGun then
                 hasGun = true
-                gunGuid = v.guid
+                FireServer("equip", v.guid)
                 break
             end
         end
@@ -1018,26 +664,16 @@ local function prepareWeapon()
                 local originalCF = root.CFrame
                 root.CFrame = buyLoc
                 task.wait(0.5)
-                for retry = 1, 3 do
-                    InvokeServer("attemptPurchase", selectedGun)
-                    task.wait(0.3)
-                    refreshItems()
-                    for _, v in pairs(items) do
-                        if v.name == selectedGun then
-                            hasGun = true
-                            gunGuid = v.guid
-                            break
-                        end
+                InvokeServer("attemptPurchase", selectedGun)
+                task.wait(0.3)
+                for _, v in pairs(items) do
+                    if v.name == selectedGun then
+                        FireServer("equip", v.guid)
+                        break
                     end
-                    if hasGun then break end
-                end
-                if hasGun then
-                    FireServer("equip", gunGuid)
                 end
                 root.CFrame = originalCF
             end
-        else
-            FireServer("equip", gunGuid)
         end
     else
         local hasWeapon = false
@@ -1056,18 +692,12 @@ local function prepareWeapon()
                 local originalCF = root.CFrame
                 root.CFrame = buyLoc
                 task.wait(0.5)
-                for retry = 1, 3 do
-                    InvokeServer("attemptPurchase", selectedWeapon)
-                    task.wait(0.3)
-                    refreshItems()
-                    for _, v in pairs(items) do
-                        if v.name == selectedWeapon then
-                            bladeid = v.guid
-                            hasWeapon = true
-                            break
-                        end
+                InvokeServer("attemptPurchase", selectedWeapon)
+                for _, v in pairs(items) do
+                    if v.name == selectedWeapon then
+                        bladeid = v.guid
+                        break
                     end
-                    if hasWeapon then break end
                 end
                 if bladeid then
                     FireServer("equip", bladeid)
@@ -1085,15 +715,12 @@ local function attackTarget(target)
     local targetPos = target.Position
     if selectedWeapon == "Gun Kill" then
         local item = v3item.inventory.getEquippedItem()
-        if not item or item.name ~= selectedGun then
-            prepareWeapon()
-            item = v3item.inventory.getEquippedItem()
-        end
         if item and item.type == "Gun" then
             if item.ammoManager and item.ammoManager.ammo <= 0 then
                 FireServer("reload", item.guid)
                 return
             end
+
             if selectedGun == "Raygun" then
                 local g = devv.load("GUID")()
                 createTrace(targetPos)
@@ -1109,6 +736,7 @@ local function attackTarget(target)
                 end
                 return
             end
+
             local g = devv.load("GUID")()
             createTrace(targetPos)
             FireServer("replicateProjectiles", item.guid, {{g, target.CFrame}}, item.firemode)
@@ -1130,43 +758,46 @@ local function attackTarget(target)
     end
 end
 
-local function shouldAttackPlayer(player, checkFriend)
-    if player == LocalPlayer then return false end
-    if not player.Character then return false end
-    if hasShieldProtection(player) then return false end
-    if #targetPlayers > 0 then
-        return tableFind(targetPlayers, player.Name)
-    else
-        if checkFriend then
-            local success, isFriend = pcall(function() return LocalPlayer:IsFriendsWith(player.UserId) end)
-            if success and isFriend then
-                return false
-            end
-        end
-        return true
-    end
-end
-
 local function auraHeartbeat()
     local myChar = LocalPlayer.Character
     if not myChar or not getRoot(myChar) then return end
     local myRoot = getRoot(myChar)
     local targetHead = nil
     local minDist = math.huge
+
+    local shouldSkipFriend = (#targetPlayers == 0)
+
     for _, player in ipairs(Players:GetPlayers()) do
-        if shouldAttackPlayer(player, true) and player.Character and player.Character:FindFirstChild("Head") then
-            local head = player.Character.Head
-            local dist = (myRoot.Position - head.Position).Magnitude
-            if dist < minDist and (head.Position - avoidPosition).Magnitude > avoidRadius then
-                minDist = dist
-                targetHead = head
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
+            local isTarget = false
+            if #targetPlayers > 0 then
+                isTarget = tableFind(targetPlayers, player.Name)
+            else
+                isTarget = true
+            end
+
+            if isTarget and not player.Character:FindFirstChildOfClass("ForceField") then
+                if shouldSkipFriend then
+                    if LocalPlayer:IsFriendsWith(player.UserId) then
+                        continue
+                    end
+                end
+                local head = player.Character.Head
+                local dist = (myRoot.Position - head.Position).Magnitude
+                if dist < minDist and (head.Position - avoidPosition).Magnitude > avoidRadius then
+                    minDist = dist
+                    targetHead = head
+                end
             end
         end
     end
+
     if not targetHead then return end
+
     if tpplayfb then
         myRoot.CFrame = targetHead.CFrame * CFrame.new(fbx, fby, fbz)
     end
+
     if aurablade then
         local now = tick()
         local dist = (myRoot.Position - targetHead.Position).Magnitude
@@ -1187,28 +818,32 @@ local function updateAuraConnection()
     end
 end
 
-local function setupSilentAimAndRainbow()
-    if not v3item.projectiles then return end
-    local oldNewProjectile = v3item.projectiles.newProjectileOfType
-    v3item.projectiles.newProjectileOfType = function(ptype, pdata)
-        if silentaim then
-            local target = findTarget()
-            if target and pdata.cframe then
-                pdata.cframe = CFrame.lookAt(pdata.cframe.Position, target.Position)
+local function setupSilentAim()
+    if v3item and v3item.projectiles then
+        local oldNewProjectile = v3item.projectiles.newProjectileOfType
+        v3item.projectiles.newProjectileOfType = function(ptype, pdata)
+            if silentaim then
+                local target = findTarget()
+                if target and pdata.cframe then
+                    pdata.cframe = CFrame.lookAt(pdata.cframe.Position, target.Position)
+                end
             end
+            return oldNewProjectile(ptype, pdata)
         end
-        return oldNewProjectile(ptype, pdata)
     end
 end
-setupSilentAimAndRainbow()
+setupSilentAim()
 
 local function buyMaskIfNeeded()
     if not maskAutoBuy or maskBuying then return end
     local char = LocalPlayer.Character
     if not char then return end
+
     local maskName = maskNames[selectedMaskType]
     if not maskName then return end
+
     if char:FindFirstChild(maskName) then return end
+
     maskBuying = true
     local root = getRoot(char)
     if root then
@@ -1218,6 +853,7 @@ local function buyMaskIfNeeded()
         local randomPos = buyLoc.Position + Vector3.new(offsetX, 0, offsetZ)
         root.CFrame = CFrame.new(randomPos)
         task.wait(0.5)
+
         InvokeServer("attemptPurchase", maskName)
         task.wait(0.3)
         for _, v in pairs(items) do
@@ -1231,7 +867,7 @@ local function buyMaskIfNeeded()
         while not char:FindFirstChild(maskName) and tick() - startTime < 2 do
             task.wait(0.1)
         end
-        if currentMode == "AFK" and not autoWorkEnabled then
+        if currentMode == "AFK" then
             root.CFrame = getCurrentIdleCF()
         end
     end
@@ -1243,7 +879,9 @@ local function runATMPhase()
     if not atms then return end
     local root = getRoot(LocalPlayer.Character)
     if not root then return end
+
     local originalCF = root.CFrame
+
     local nearestATM, nearestDist = nil, math.huge
     for _, atm in ipairs(atms:GetChildren()) do
         if atm:IsA("Model") and (atm:GetAttribute("health") or 0) ~= 0 then
@@ -1258,11 +896,13 @@ local function runATMPhase()
         end
     end
     if not nearestATM then return end
+
     local main = nearestATM:FindFirstChild("Main")
     local targetPos = main.Position + Vector3.new(0, -4, 0)
     local backDir = -main.CFrame.LookVector
     local yaw = math.atan2(backDir.X, backDir.Z) + atmYawOffset
     local targetCF = CFrame.new(targetPos) * CFrame.Angles(math.rad(90), 0, yaw)
+
     local lockConn = RunService.Heartbeat:Connect(function()
         if root and root.Parent then
             root.CFrame = targetCF
@@ -1270,11 +910,14 @@ local function runATMPhase()
             root.RotVelocity = Vector3.zero
         end
     end)
+
     task.wait(0.8)
     nearestATM:SetAttribute("health", 0)
     task.wait(1.4)
+
     if lockConn then lockConn:Disconnect() end
-    if currentMode == "AFK" and not autoWorkEnabled then
+
+    if currentMode == "AFK" then
         root.CFrame = getCurrentIdleCF()
     else
         root.CFrame = originalCF
@@ -1311,6 +954,7 @@ end
 local function tryGemRubble()
     local rubble = workspace:FindFirstChild("GemRobbery") and workspace.GemRobbery:FindFirstChild("Rubble")
     if not rubble or not rubble:IsDescendantOf(workspace) then return false end
+
     local tntGuid = getGuid("TNT")
     if not tntGuid then
         local root = getRoot(LocalPlayer.Character)
@@ -1334,18 +978,22 @@ local function tryGemRubble()
         root.CFrame = originalCF
         if not tntGuid then return false end
     end
+
     local root = getRoot(LocalPlayer.Character)
     if not root then return false end
     local originalCF = root.CFrame
+
     local standCFrame = CFrame.new(1694, 22, -725)
     local throwTarget = Vector3.new(1700, 16, -721)
+
     root.CFrame = standCFrame
     FireServer("equip", tntGuid)
     task.wait(0.2)
     FireServer("throwItem", tntGuid, Vector3.new(5.2, 29.9, 79.3), throwTarget)
     task.wait(0.5)
     FireServer("removeItem", tntGuid)
-    if currentMode == "AFK" and not autoWorkEnabled then
+
+    if currentMode == "AFK" then
         root.CFrame = getCurrentIdleCF()
     else
         root.CFrame = originalCF
@@ -1358,12 +1006,16 @@ local function tryBankHeist()
     if not bank then return false end
     local cashFolder = bank:FindFirstChild("BankCash") and bank.BankCash:FindFirstChild("Cash")
     if not cashFolder or #cashFolder:GetChildren() == 0 then return false end
+
     local adjustedGrenadeLoc = CFrame.new(grenadeBuyLocation.Position + Vector3.new(0, -2, 0))
     local fragGuid = ensureItem("Frag", adjustedGrenadeLoc)
     if not fragGuid then return false end
+
     local root = getRoot(LocalPlayer.Character)
     if not root then return false end
+
     local originalCF = root.CFrame
+
     root.CFrame = bombThrowLocation
     task.wait(0.3)
     FireServer("equip", fragGuid)
@@ -1372,17 +1024,21 @@ local function tryBankHeist()
     FireServer("throwItem", fragGuid, direction, bombTargetPosition)
     FireServer("removeItem", fragGuid)
     task.wait(1.5)
+
     bank = workspace:FindFirstChild("BankRobbery")
     if not bank then return false end
     local promptPart = bank:FindFirstChild("BankCash") and bank.BankCash:FindFirstChild("Main")
     local prompt = promptPart and promptPart:FindFirstChild("Attachment") and promptPart.Attachment:FindFirstChild("ProximityPrompt")
     if not prompt or not prompt.Enabled then return false end
+
     root = getRoot(LocalPlayer.Character)
     if not root then return false end
+
     root.CFrame = afterExplosionWaitLocation
     local lockPos = (afterExplosionWaitLocation * CFrame.new(0, 0, -4)).Position
     local lockCF = CFrame.new(lockPos) * CFrame.Angles(math.rad(90), 0, 0)
     local collectCF = CFrame.new((bank.BankCash.Pallet.CFrame * CFrame.new(0, -2, 0)).Position) * CFrame.Angles(math.rad(90), 0, 0)
+
     local lockConn
     local currentLockCF = lockCF
     lockConn = RunService.Heartbeat:Connect(function()
@@ -1393,8 +1049,11 @@ local function tryBankHeist()
             currentRoot.RotVelocity = Vector3.zero
         end
     end)
+
     task.wait(4)
+
     currentLockCF = collectCF
+
     local cashConnection
     cashConnection = RunService.Heartbeat:Connect(function()
         if not cashFolder or not cashFolder.Parent or #cashFolder:GetChildren() == 0 then
@@ -1403,12 +1062,14 @@ local function tryBankHeist()
         end
         pcall(function() fireproximityprompt(prompt) end)
     end)
+
     repeat task.wait(0.2) until not prompt.Enabled or #cashFolder:GetChildren() == 0
     if cashConnection then cashConnection:Disconnect() end
     if lockConn then lockConn:Disconnect() end
+
     root = getRoot(LocalPlayer.Character)
     if root then
-        if currentMode == "AFK" and not autoWorkEnabled then
+        if currentMode == "AFK" then
             root.CFrame = getCurrentIdleCF()
         else
             root.CFrame = originalCF
@@ -1422,9 +1083,11 @@ local function runJewelPhase()
     if not gemRobbery then return false end
     local cases = gemRobbery:FindFirstChild("JewelryCases")
     if not cases then return false end
+
     local root = getRoot(LocalPlayer.Character)
     if not root then return false end
     local originalCF = root.CFrame
+
     for _, descendant in pairs(cases:GetDescendants()) do
         if descendant:IsA("ProximityPrompt") and descendant.ActionText == "Steal" and descendant.Enabled then
             descendant.HoldDuration = 0
@@ -1433,7 +1096,8 @@ local function runJewelPhase()
             root.CFrame = CFrame.new(targetPos)
             task.wait(0.1)
             fireproximityprompt(descendant)
-            if currentMode == "AFK" and not autoWorkEnabled then
+
+            if currentMode == "AFK" then
                 root.CFrame = getCurrentIdleCF()
             else
                 root.CFrame = originalCF
@@ -1473,8 +1137,6 @@ local function runItemFindPhase()
         if Autoitem("Gold Crown") then did = true end
         if Autoitem("Treasure Map") then did = true end
         if Autoitem("Spectral Scythe") then did = true end
-        if Autoitem("Spirit Kunai") then did = true end
-        if Autoitem("Kunai") then did = true end
     end
     if autoptbs then
         if Autoitem("Amethyst") then did = true end
@@ -1493,6 +1155,7 @@ local function runItemFindPhase()
             if Autoitem("Military Armory Keycard") then did = true end
         end
     end
+
     return did
 end
 
@@ -1520,6 +1183,7 @@ local function runSafePhase()
         end
         return false
     end
+
     local chestTypes = {"SmallSafe","MediumSafe","LargeSafe","JewelSafe","GoldJewelSafe"}
     for _, ct in pairs(chestTypes) do
         local folder = workspace.Game.Entities:FindFirstChild(ct)
@@ -1533,6 +1197,7 @@ local function runSafePhase()
                             local originalCF = root.CFrame
                             local lockCF = CFrame.new(chest.PrimaryPart.Position - Vector3.new(0,3,0)) * CFrame.Angles(math.rad(90), 0, 0)
                             root.CFrame = lockCF
+
                             local lockConn = RunService.Heartbeat:Connect(function()
                                 if root and root.Parent then
                                     root.CFrame = lockCF
@@ -1540,10 +1205,12 @@ local function runSafePhase()
                                     root.RotVelocity = Vector3.zero
                                 end
                             end)
+
                             fireproximityprompt(prompt)
                             task.wait(3.0)
+
                             if lockConn then lockConn:Disconnect() end
-                            if currentMode == "AFK" and not autoWorkEnabled then
+                            if currentMode == "AFK" then
                                 root.CFrame = getCurrentIdleCF()
                             else
                                 root.CFrame = originalCF
@@ -1569,15 +1236,17 @@ local function startUnlockAura()
         local char = LocalPlayer.Character
         local root = getRoot(char)
         if not root then return end
+
         local lockGuid = getGuid("Lockpick")
         if not lockGuid then
             InvokeServer("attemptPurchase", "Lockpick")
         end
+
         local safeTypes = {"LargeSafe", "MediumSafe", "SmallSafe", "JewelSafe", "GoldJewelSafe"}
         for _, safeType in ipairs(safeTypes) do
             local folder = workspace.Game.Entities:FindFirstChild(safeType)
             if folder then
-                for _, safe in pairs(folder:GetChildren()) do
+                for _, safe in ipairs(folder:GetChildren()) do
                     if safe:FindFirstChild("ProximityPrompt", true) then
                         local distance = (root.Position - safe:GetPivot().Position).Magnitude
                         if distance <= 45 then
@@ -1649,6 +1318,7 @@ local function startItemAura()
         itemAuraTimer = itemAuraTimer + deltaTime
         if itemAuraTimer < ITEM_AURA_INTERVAL then return end
         itemAuraTimer = 0
+
         local root = getRoot(LocalPlayer.Character)
         if not root then return end
         local itemPickup = workspace.Game.Entities.ItemPickup
@@ -1683,7 +1353,7 @@ end
 
 local function updateIdleConnection()
     if idleConnection then idleConnection:Disconnect(); idleConnection = nil end
-    if currentMode == "AFK" and not autoWorkEnabled then
+    if currentMode == "AFK" then
         local targetCF = getCurrentIdleCF()
         idleConnection = RunService.Heartbeat:Connect(function()
             if not busy and not maskBuying then
@@ -1762,37 +1432,66 @@ local function startFlameAttack()
                     local equippedGUID = equippedItem.guid
                     local equippedName = equippedItem.name
                     local currentAmmo = equippedItem.ammoManager and equippedItem.ammoManager.ammo or 0
+
                     if currentAmmo <= 0 then
                         FireServer("reload", equippedGUID)
                         task.wait(0.2)
                     else
+                        local friendIDs = {}
+                        for _, player in pairs(Players:GetPlayers()) do
+                            if player ~= LocalPlayer then
+                                local success, isFriend = pcall(function() return LocalPlayer:IsFriendsWith(player.UserId) end)
+                                if success and isFriend then
+                                    table.insert(friendIDs, player.UserId)
+                                end
+                            end
+                        end
+
                         local myRoot = getRoot(LocalPlayer.Character)
                         if myRoot then
                             for _, player in pairs(Players:GetPlayers()) do
                                 if not flameAttackEnabled then break end
-                                if shouldAttackPlayer(player, #targetPlayers == 0) then
-                                    local character = player.Character
-                                    local humanoid = character:FindFirstChild("Humanoid")
-                                    local targetPart = character:FindFirstChild(hitPart)
-                                    if humanoid and targetPart and humanoid.Health > 0 then
-                                        local targetRoot = character:FindFirstChild("HumanoidRootPart")
-                                        if targetRoot then
-                                            local distance = (myRoot.Position - targetRoot.Position).magnitude
-                                            if distance <= flameAttackDistance then
-                                                FireServer("replicateProjectiles", equippedGUID, { { same[1], targetPart.CFrame } }, "auto")
-                                                if equippedName == "Flamethrower" then
-                                                    FireServer("flameHit", same[1], GUID(), targetPart.Position)
-                                                elseif equippedName == "Acid Gun" then
-                                                    FireServer("acidHit", same[1], GUID(), targetPart.Position)
-                                                end
-                                                FireServer("projectileHit", same[1], "player", {
-                                                    hitPart = targetPart,
-                                                    hitPlayerId = player.UserId,
-                                                    hitSize = targetPart.Size,
-                                                    pos = targetPart.Position
-                                                })
-                                                if equippedItem.ammoManager then
-                                                    equippedItem.ammoManager.ammo = equippedItem.ammoManager.ammo - 1
+                                if player ~= LocalPlayer and player.Character then
+                                    local isTarget = false
+                                    if #targetPlayers > 0 then
+                                        isTarget = tableFind(targetPlayers, player.Name)
+                                    else
+                                        isTarget = true
+                                    end
+
+                                    if isTarget then
+                                        local isFriend = false
+                                        for _, friendID in pairs(friendIDs) do
+                                            if player.UserId == friendID then
+                                                isFriend = true
+                                                break
+                                            end
+                                        end
+                                        if not isFriend then
+                                            local character = player.Character
+                                            local humanoid = character:FindFirstChild("Humanoid")
+                                            local targetPart = character:FindFirstChild(hitPart)
+                                            if humanoid and targetPart and humanoid.Health > 0 then
+                                                local targetRoot = character:FindFirstChild("HumanoidRootPart")
+                                                if targetRoot then
+                                                    local distance = (myRoot.Position - targetRoot.Position).magnitude
+                                                    if distance <= flameAttackDistance then
+                                                        FireServer("replicateProjectiles", equippedGUID, { { same[1], targetPart.CFrame } }, "auto")
+                                                        if equippedName == "Flamethrower" then
+                                                            FireServer("flameHit", same[1], GUID(), targetPart.Position)
+                                                        elseif equippedName == "Acid Gun" then
+                                                            FireServer("acidHit", same[1], GUID(), targetPart.Position)
+                                                        end
+                                                        FireServer("projectileHit", same[1], "player", {
+                                                            hitPart = targetPart,
+                                                            hitPlayerId = player.UserId,
+                                                            hitSize = targetPart.Size,
+                                                            pos = targetPart.Position
+                                                        })
+                                                        if equippedItem.ammoManager then
+                                                            equippedItem.ammoManager.ammo = equippedItem.ammoManager.ammo - 1
+                                                        end
+                                                    end
                                                 end
                                             end
                                         end
@@ -1822,28 +1521,57 @@ local function startRPGAttack()
                 else
                     local equippedGUID = equippedItem.guid
                     local equippedName = equippedItem.name
+
+                    local friendIDs = {}
+                    for _, player in pairs(Players:GetPlayers()) do
+                        if player ~= LocalPlayer then
+                            local success, isFriend = pcall(function() return LocalPlayer:IsFriendsWith(player.UserId) end)
+                            if success and isFriend then
+                                table.insert(friendIDs, player.UserId)
+                            end
+                        end
+                    end
+
                     local myRoot = getRoot(LocalPlayer.Character)
                     if myRoot then
                         for _, player in pairs(Players:GetPlayers()) do
                             if not rpgAttackEnabled then break end
-                            if shouldAttackPlayer(player, #targetPlayers == 0) then
-                                local character = player.Character
-                                local humanoid = character:FindFirstChild("Humanoid")
-                                local targetPart = character:FindFirstChild(hitPart)
-                                local targetRoot = character:FindFirstChild("HumanoidRootPart")
-                                if humanoid and targetPart and targetRoot and humanoid.Health > rpgMinHealth then
-                                    local distance = (myRoot.Position - targetRoot.Position).magnitude
-                                    if distance <= rpgAttackDistance then
-                                        local replicateArgs = {equippedGUID}
-                                        local projectileData = {{same[1], targetPart.CFrame}}
-                                        replicateArgs[2] = projectileData
-                                        replicateArgs[3] = "semi"
-                                        FireServer("replicateProjectiles", unpack(replicateArgs))
-                                        local rocketArgs = {same[1], GUID(), targetPart.Position}
-                                        for i = 1, 5 do
-                                            FireServer("rocketHit", unpack(rocketArgs))
+                            if player ~= LocalPlayer and player.Character then
+                                local isTarget = false
+                                if #targetPlayers > 0 then
+                                    isTarget = tableFind(targetPlayers, player.Name)
+                                else
+                                    isTarget = true
+                                end
+
+                                if isTarget then
+                                    local isFriend = false
+                                    for _, friendID in pairs(friendIDs) do
+                                        if player.UserId == friendID then
+                                            isFriend = true
+                                            break
                                         end
-                                        FireServer("reload", equippedGUID)
+                                    end
+                                    if not isFriend then
+                                        local character = player.Character
+                                        local humanoid = character:FindFirstChild("Humanoid")
+                                        local targetPart = character:FindFirstChild(hitPart)
+                                        local targetRoot = character:FindFirstChild("HumanoidRootPart")
+                                        if humanoid and targetPart and targetRoot and humanoid.Health > rpgMinHealth then
+                                            local distance = (myRoot.Position - targetRoot.Position).magnitude
+                                            if distance <= rpgAttackDistance then
+                                                local replicateArgs = {equippedGUID}
+                                                local projectileData = {{same[1], targetPart.CFrame}}
+                                                replicateArgs[2] = projectileData
+                                                replicateArgs[3] = "semi"
+                                                FireServer("replicateProjectiles", unpack(replicateArgs))
+                                                local rocketArgs = {same[1], GUID(), targetPart.Position}
+                                                for i = 1, 5 do
+                                                    FireServer("rocketHit", unpack(rocketArgs))
+                                                end
+                                                FireServer("reload", equippedGUID)
+                                            end
+                                        end
                                     end
                                 end
                             end
@@ -1866,7 +1594,6 @@ local function performCrafting()
 end
 
 local function storeGems()
-    if busy then return end
     local housingPlots = workspace:FindFirstChild("HousingPlots")
     if not housingPlots then return end
     local items = v3item.inventory.items
@@ -1894,7 +1621,7 @@ local function stompAura()
     local rootPart = character:FindFirstChild("HumanoidRootPart")
     if not rootPart then return end
     for _, player in ipairs(Players:GetPlayers()) do
-        if shouldAttackPlayer(player, #targetPlayers == 0) then
+        if player ~= LocalPlayer and player.Character then
             local targetChar = player.Character
             local targetHRP = targetChar:FindFirstChild("HumanoidRootPart")
             local targetHumanoid = targetChar:FindFirstChild("Humanoid")
@@ -1914,7 +1641,7 @@ local function grabAura()
     local rootPart = character:FindFirstChild("HumanoidRootPart")
     if not rootPart then return end
     for _, player in ipairs(Players:GetPlayers()) do
-        if shouldAttackPlayer(player, #targetPlayers == 0) then
+        if player ~= LocalPlayer and player.Character then
             local targetChar = player.Character
             local targetHRP = targetChar:FindFirstChild("HumanoidRootPart")
             local targetHumanoid = targetChar:FindFirstChild("Humanoid")
@@ -1938,6 +1665,7 @@ local function executeCashRegister()
         end
     end
     if #aliveRegs == 0 then return false end
+
     local fistsGuid = nil
     for _, v in pairs(items) do
         if v.name == "Fists" then
@@ -1946,8 +1674,10 @@ local function executeCashRegister()
         end
     end
     if not fistsGuid then return false end
+
     local root = getRoot(LocalPlayer.Character)
     if not root then return false end
+
     for _, target in ipairs(aliveRegs) do
         if not autoCashRegister then break end
         local targetCFrame = target.WorldPivot * CFrame.new(0, -5, 0) * CFrame.Angles(math.rad(90), 0, 0)
@@ -1994,16 +1724,14 @@ local function startPunchAura()
         if not fistsGuid then return end
         local myPos = LocalPlayer.Character.HumanoidRootPart.Position
         for _, player in ipairs(Players:GetPlayers()) do
-            if shouldAttackPlayer(player, #targetPlayers == 0) then
-                if player.Character:FindFirstChild("HumanoidRootPart") and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
-                    if (myPos - player.Character.HumanoidRootPart.Position).Magnitude <= 35 then
-                        task.spawn(function()
-                            FireServer("equip", fistsGuid)
-                            pcall(function()
-                                FireServer("attackMeleeHit", "player", {meleeType = punchType, hitPlayerId = player.UserId, weaponGUID = fistsGuid})
-                            end)
+            if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
+                if (myPos - player.Character.HumanoidRootPart.Position).Magnitude <= 35 then
+                    task.spawn(function()
+                        FireServer("equip", fistsGuid)
+                        pcall(function()
+                            FireServer("attackMeleeHit", "player", {meleeType = punchType, hitPlayerId = player.UserId, weaponGUID = fistsGuid})
                         end)
-                    end
+                    end)
                 end
             end
         end
@@ -2021,6 +1749,7 @@ end
 task.spawn(function()
     while true do
         task.wait(1)
+
         if autoBuyGunAmmo and selectedWeapon == "Gun Kill" and selectedGun ~= "Raygun" then
             gunBuyTimer = gunBuyTimer + 1
             if gunBuyTimer >= gunBuyInterval then
@@ -2044,6 +1773,7 @@ task.spawn(function()
         else
             gunBuyTimer = 0
         end
+
         if autoBuyFlameAmmo and flameAttackEnabled then
             flameBuyTimer = flameBuyTimer + 1
             if flameBuyTimer >= flameBuyInterval then
@@ -2067,6 +1797,7 @@ task.spawn(function()
         else
             flameBuyTimer = 0
         end
+
         if autoBuyRPGAmmo and rpgAttackEnabled then
             rpgBuyTimer = rpgBuyTimer + 1
             if rpgBuyTimer >= rpgBuyInterval then
@@ -2178,37 +1909,6 @@ local function setupUI()
     end
 
     do
-        local PlayerGroup3 = Tabs.Player:AddLeftGroupbox('辅助')
-        PlayerGroup3:AddToggle('fovToggle', {
-            Text = '扩大视野',
-            Default = false,
-            Callback = function(v)
-                if v then
-                    fovConnection = RunService.Heartbeat:Connect(function()
-                        workspace.CurrentCamera.FieldOfView = 120
-                    end)
-                else
-                    if fovConnection then
-                        fovConnection:Disconnect()
-                        fovConnection = nil
-                    end
-                end
-            end
-        })
-        PlayerGroup3:AddToggle('fastInteractToggle', {
-            Text = '快速互动',
-            Default = false,
-            Callback = function(state)
-                if state then
-                    game.ProximityPromptService.PromptButtonHoldBegan:Connect(function(prompt)
-                        prompt.HoldDuration = 0
-                    end)
-                end
-            end
-        })
-    end
-
-    do
         local VisualGroup = Tabs.Visual:AddLeftGroupbox('ESP 设置')
         VisualGroup:AddToggle('espMaster', { Text = '开启 ESP', Default = false, Callback = toggleESP })
         VisualGroup:AddToggle('espName', { Text = '显示玩家名', Default = true, Callback = function(s) DrawingConfig.NameEnabled = s end })
@@ -2236,6 +1936,7 @@ local function setupUI()
                 end
             end
         })
+
         KillGroup:AddButton('刷新玩家列表', function()
             local newList = getPlayerListValues()
             if playerDropdown then
@@ -2252,6 +1953,7 @@ local function setupUI()
                 end)
             end
         end)
+
         KillGroup:AddDropdown('killMethod', {
             Text = '击杀方式',
             Values = {'Ninja Star', 'Tomahawk', 'Banana Peel', 'Gun Kill'},
@@ -2352,6 +2054,7 @@ local function setupUI()
 
     do
         local CombatGroup = Tabs.Ohio:AddRightGroupbox('战斗')
+
         CombatGroup:AddDropdown('maskSelect', {
             Text = '口罩选择',
             Values = {'黑色头巾', '红色头巾', '蓝色头巾', '外科医生口罩', '面具'},
@@ -2361,6 +2064,7 @@ local function setupUI()
                 maskAutoBuy = true
             end
         })
+
         CombatGroup:AddToggle('autoVest', { Text = '自动护甲', Default = false, Callback = function(s) autovest = s end })
         CombatGroup:AddToggle('autoHeal', { Text = '自动回血', Default = false, Callback = function(s) autohealth = s end })
         CombatGroup:AddToggle('autoMask', { Text = '自动口罩', Default = false, Callback = function(s) autokz = s end })
@@ -2403,6 +2107,7 @@ local function setupUI()
 
     do
         local AutoGroup = Tabs.Ohio:AddLeftGroupbox('自动')
+
         AutoGroup:AddDropdown('modeSelect', {
             Text = '农场模式',
             Values = {'AFK', 'Normal'},
@@ -2422,6 +2127,7 @@ local function setupUI()
             end
         })
         AutoGroup:AddDivider()
+
         AutoGroup:AddToggle('autoATM', { Text = '自动摧毁ATM', Default = false, Callback = function(s) FromATM = s end })
         AutoGroup:AddToggle('autoBank', { Text = '自动偷盗银行', Default = false, Callback = function(s) FromBank = s end })
         AutoGroup:AddToggle('autoCashRegister', {
@@ -2441,6 +2147,7 @@ local function setupUI()
                 if not s then gemRubbleCooldown = 0 end
             end
         })
+
         AutoGroup:AddToggle('autoCollectTruckCash', {
             Text = '自动收集装甲车现金',
             Desc = '自动收集附近装甲车现金',
@@ -2476,15 +2183,37 @@ local function setupUI()
                 end
             end
         })
+
         AutoGroup:AddToggle('autoJewel', { Text = '自动珠宝店', Default = false, Callback = function(s) autozbd = s end })
-        AutoGroup:AddToggle('autoPickComponent', {
-            Text = '自动捡材料',
-            Desc = '传送至 Electronics/Weapon Parts/Component Box 位置拾取',
+
+        AutoGroup:AddToggle('autoCollectScrap', {
+            Text = '自动捡废料',
+            Desc = '传送至废料位置跳跃后等待2秒拾取',
             Default = false,
-            Callback = function(s)
-                autoPickComponentEnabled = s
+            Callback = function(Value)
+                autoCollectScrap = Value
+                if Value then
+                    task.spawn(function()
+                        while autoCollectScrap do
+                            if FromATM or FromBank or autobx or autozbd or autoTreasure or autoblock or automoss or autoxybs or autoxywp or autoptbs or automoney or card then
+                                task.wait(1)
+                                continue
+                            end
+                            busy = true
+                            local success = fastCollectItems({"Electronics", "Weapon Parts"})
+                            if not success then
+                                task.wait(1)
+                            end
+                            busy = false
+                            task.wait(0.1)
+                        end
+                    end)
+                else
+                    busy = false
+                end
             end
         })
+
         AutoGroup:AddToggle('autoSlotMachine', {
             Text = '自动老虎机',
             Desc = '传送至老虎机前自动旋转',
@@ -2544,14 +2273,8 @@ local function setupUI()
                 end
             end
         })
-        AutoGroup:AddToggle('treasureFarm', {
-            Text = '自动挖海盗宝藏',
-            Desc = '持有藏宝图时自动传送到海盗宝藏标记并挖掘',
-            Default = false,
-            Callback = function(s)
-                treasureFarmEnabled = s
-            end
-        })
+
+        AutoGroup:AddToggle('autoTreasure', { Text = '自动藏宝图', Default = false, Callback = function(s) autoTreasure = s end })
         AutoGroup:AddToggle('autoSafe', { Text = '自动打开保险', Default = false, Callback = function(s) autobx = s end })
         AutoGroup:AddToggle('unlockAura', {
             Text = '开锁光环',
@@ -2565,47 +2288,7 @@ local function setupUI()
                 end
             end
         })
-        AutoGroup:AddToggle('cleanAura', {
-            Text = '打扫光环',
-            Desc = '雇佣工作后自动打扫垃圾',
-            Default = false,
-            Callback = function(s)
-                autoCleanEnabled = s
-            end
-        })
-        AutoGroup:AddToggle('autoAirdrop', {
-            Text = '自动领取空投',
-            Desc = '自动传送到空投位置并领取',
-            Default = false,
-            Callback = function(s)
-                autoAirdropEnabled = s
-            end
-        })
-        AutoGroup:AddToggle('autoRent', {
-            Text = '自动租房',
-            Desc = '每2秒检测并自动租房',
-            Default = false,
-            Callback = function(s)
-                autoRentHouseEnabled = s
-            end
-        })
-        AutoGroup:AddToggle('autoWork', {
-            Text = '自动工作',
-            Desc = '持续传送到鞋店打工并清理垃圾',
-            Default = false,
-            Callback = function(s)
-                autoWorkEnabled = s
-                updateIdleConnection()
-            end
-        })
-        AutoGroup:AddToggle('autoTeleportStoreGems', {
-            Text = '自动传回家存宝石',
-            Desc = '有珍贵宝石时自动传回家存储',
-            Default = false,
-            Callback = function(s)
-                autoTeleportStoreGemsEnabled = s
-            end
-        })
+
         AutoGroup:AddToggle('cashAura', { Text = '现金光环', Default = false, Callback = function(s)
             cashAuraEnabled = s
             if s then startCashAura() else stopCashAura() end
@@ -2614,6 +2297,7 @@ local function setupUI()
             itemAuraEnabled = s
             if s then startItemAura() else stopItemAura() end
         end })
+
         function autoSellItems()
             local sold = false
             for _, v in pairs(items) do
@@ -2627,6 +2311,7 @@ local function setupUI()
             end
             return sold
         end
+
         AutoGroup:AddToggle('autoSell', { Text = '自动售卖全部物品', Default = false, Callback = function(Value)
             autoSellEnabled = Value
             if autoSellTask then
@@ -2642,8 +2327,10 @@ local function setupUI()
                 end)
             end
         end })
+
         AutoGroup:AddToggle('autoRemove', { Text = '自动移除垃圾', Default = false, Callback = function(s) remls = s end })
         AutoGroup:AddToggle('autoConsume', { Text = '自动使用消耗品', Default = false, Callback = function(s) autouse = s end })
+
         AutoGroup:AddToggle('autoCraft', {
             Text = '自动制作萝莉',
             Desc = '制作 Rollie 萝莉',
@@ -2668,6 +2355,7 @@ local function setupUI()
                 autoStoreGems = s
             end
         })
+
         AutoGroup:AddToggle('autoReward', {
             Text = '自动领取奖励',
             Desc = '自动领取每日奖励和游玩时间奖励',
@@ -2699,6 +2387,7 @@ local function setupUI()
         CounterGroup:AddButton('重新进入服务器', function()
             game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
         end)
+
         local toastTarget = "关闭"
         local toastTargetDropdown = CounterGroup:AddDropdown('toastTargetSelect', {
             Text = '弹窗目标',
@@ -2708,6 +2397,7 @@ local function setupUI()
                 toastTarget = v
             end
         })
+
         local function refreshToastTargets()
             local names = {"关闭"}
             for _, player in ipairs(Players:GetPlayers()) do
@@ -2734,12 +2424,14 @@ local function setupUI()
                 end)
             end
         end
+
         task.spawn(function()
             while true do
                 task.wait(0.5)
                 refreshToastTargets()
             end
         end)
+
         local toastMsg, toastTime = "", 5
         CounterGroup:AddInput('toastMsg', {
             Text = '弹窗内容',
@@ -2751,6 +2443,7 @@ local function setupUI()
             Default = '5',
             Callback = function(v) toastTime = tonumber(v) or 5 end
         })
+
         CounterGroup:AddButton('发送弹窗', function()
             if toastTarget == "关闭" then
                 loadModule("makeToast")(toastMsg, "rainbow", toastTime)
@@ -2775,6 +2468,7 @@ local function setupUI()
                 end
             end
         end)
+
         CounterGroup:AddButton('通话禁音', function()
             FireServer("setAirplaneMode", true)
             LocalPlayer:SetAttribute('isAirplaneMode', true)
@@ -2891,13 +2585,6 @@ local function setupUI()
     do
         local WeaponGroup = Tabs.Ohio:AddLeftGroupbox('武器')
         WeaponGroup:AddToggle('silentAim', { Text = '静默自瞄', Default = false, Callback = function(s) silentaim = s end })
-        WeaponGroup:AddToggle('bulletTrace', {
-            Text = '子弹追踪',
-            Default = false,
-            Callback = function(s)
-                setBulletTraceEnabled(s)
-            end
-        })
         WeaponGroup:AddButton('全枪无后座', function()
             for _, v in game:GetDescendants() do if v:IsA("ParticleEmitter") then v:Destroy() end end
             game.DescendantAdded:Connect(function(d) if d:IsA("ParticleEmitter") then d:Destroy() end end)
@@ -2992,6 +2679,7 @@ function combatTick()
             end
         end
     end
+
     if autovest and not busy then
         local armor = LocalPlayer:GetAttribute("armor")
         if not armor or armor <= 0 then
@@ -3016,6 +2704,7 @@ function combatTick()
             end
         end
     end
+
     if autohealth and not busy then
         local char = LocalPlayer.Character
         if char then
@@ -3043,12 +2732,14 @@ function combatTick()
             end
         end
     end
+
     if autokz and maskAutoBuy then
         local char = LocalPlayer.Character
         if char and not char:FindFirstChild(maskNames[selectedMaskType]) and not maskBuying then
             task.spawn(buyMaskIfNeeded)
         end
     end
+
     if remls then
         local garbageItems = {"Topaz", "Emerald Ring", "Topaz Ring", "Amethyst Ring", "Gold Bar", "Emerald"}
         local keepThrowables = {"Ninja Star", "Tomahawk", "Frag", "Banana Peel", "TNT"}
@@ -3080,6 +2771,7 @@ function combatTick()
             end
         end
     end
+
     if Auarcuff then
         local myRoot = getRoot(LocalPlayer.Character)
         if not myRoot then return end
@@ -3102,9 +2794,11 @@ function combatTick()
             end
         end
     end
+
     if autoStomp then
         stompAura()
     end
+
     if autoGrab then
         grabAura()
     end
@@ -3134,81 +2828,50 @@ RunService.Heartbeat:Connect(function()
     if autoCraftEnabled or autoClaimEnabled then
         performCrafting()
     end
-    if autoStoreGems and not busy then
+    if autoStoreGems then
         storeGems()
     end
 end)
 
 task.spawn(function()
     while true do
-        if autoxywp and not busy then
-            busy = true
-            local found
-            repeat
-                found = false
-                if Autoitem("Spirit Kunai") then found = true
-                elseif Autoitem("Kunai") then found = true
-                elseif Autoitem("Blue Candy Cane") then found = true
-                elseif Autoitem("Suitcase Nuke") then found = true
-                elseif Autoitem("Nuke Launcher") then found = true
-                elseif Autoitem("Easter Basket") then found = true
-                elseif Autoitem("Gold Cup") then found = true
-                elseif Autoitem("Gold Crown") then found = true
-                elseif Autoitem("Treasure Map") then found = true
-                elseif Autoitem("Spectral Scythe") then found = true
-                end
-                if found then task.wait(0.1) end
-            until not found
-            busy = false
-        end
-
-        if FromBalloon and not busy then
-            busy = true
-            local found
-            repeat
-                found = false
-                for _, balloon in ipairs({"Red Balloon", "Blue Balloon", "Green Balloon", "Balloon"}) do
-                    if Autoitem(balloon) then
-                        found = true
-                        break
-                    end
-                end
-                if found then task.wait(0.1) end
-            until not found
-            busy = false
-        end
-
         if FromATM and not busy then
             busy = true
             pcall(runATMPhase)
             busy = false
         end
+
         if FromBank and not busy then
             busy = true
             pcall(tryBankHeist)
             busy = false
         end
+
         if autoCashRegister and not busy then
             busy = true
             pcall(executeCashRegister)
             busy = false
         end
+
         if autoGemRubble and not busy and (tick() - gemRubbleCooldown >= gemRubbleCooldownTime) then
             busy = true
             pcall(tryGemRubble)
             gemRubbleCooldown = tick()
             busy = false
         end
+
         if (autoblock or automoss or autoxybs or autoxywp or autoptbs or automoney or card) and not busy then
             busy = true
             while runItemFindPhase() do task.wait() end
             busy = false
         end
+
         if autozbd and not busy then
             busy = true
             while autozbd and runJewelPhase() do task.wait(0.1) end
             busy = false
         end
+
         if autoTreasure and not busy then
             busy = true
             while autoTreasure do
@@ -3219,6 +2882,7 @@ task.spawn(function()
             end
             busy = false
         end
+
         if autobx and not busy then
             busy = true
             while autobx do
@@ -3227,12 +2891,7 @@ task.spawn(function()
             end
             busy = false
         end
+
         task.wait(0.5)
     end
-end)
-
-Library:OnUnload(function()
-    setBulletTraceEnabled(false)
-    removeBulletTraceHook()
-    if fovGui then fovGui:Destroy() end
 end)
